@@ -51,15 +51,26 @@ function AnalysisContent() {
 
     const startAnalysis = async () => {
       try {
+        const access_token = localStorage.getItem("access_token")
+        if (!access_token) {
+          router.push("/auth/login")
+          return
+        }
+
         const response = await fetch("/api/pdf/analyze", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "Authorization": `Bearer ${access_token}`
           },
           body: JSON.stringify(emailIds),
         })
 
         if (!response.ok) {
+          if (response.status === 401) {
+            router.push("/auth/login")
+            return
+          }
           throw new Error("解析失敗")
         }
 

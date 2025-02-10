@@ -104,6 +104,7 @@ class EmailService:
                 return None
             
             message_data = response.json()
+            logger.info(f"獲取到郵件資料: {message_data.keys()}")
             
             # 解析郵件標頭
             headers = {
@@ -111,17 +112,55 @@ class EmailService:
                 for header in message_data["payload"]["headers"]
             }
             
-            # 解析附件信息
+            # 解析寄件者資訊
+            from_header = headers.get("from", "")
+            logger.info(f"原始寄件者資訊: {from_header}")
+            
+            # 嘗試解析 "name <email>" 格式
+            sender_name = from_header
+            sender_email = from_header
+            
+            if "<" in from_header and ">" in from_header:
+                try:
+                    name_part = from_header.split("<")[0].strip()
+                    email_part = from_header.split("<")[1].split(">")[0].strip()
+                    
+                    if name_part:
+                        sender_name = name_part
+                    sender_email = email_part
+                except Exception as e:
+                    logger.error(f"解析寄件者資訊失敗: {str(e)}")
+            
+            logger.info(f"解析後的寄件者資訊: name={sender_name}, email={sender_email}")
+            
+            # 遞迴搜索附件
             attachments = []
-            if "parts" in message_data["payload"]:
-                for part in message_data["payload"]["parts"]:
-                    if part.get("filename"):
-                        attachments.append({
-                            "filename": part["filename"],
-                            "mimeType": part["mimeType"],
-                            "size": part.get("body", {}).get("size", 0),
-                            "attachmentId": part.get("body", {}).get("attachmentId")
-                        })
+            def extract_attachments(payload):
+                if "parts" in payload:
+                    for part in payload["parts"]:
+                        if part.get("filename"):
+                            attachment = {
+                                "filename": part["filename"],
+                                "mimeType": part["mimeType"],
+                                "size": part.get("body", {}).get("size", 0),
+                                "attachmentId": part.get("body", {}).get("attachmentId")
+                            }
+                            logger.info(f"找到附件: {attachment}")
+                            attachments.append(attachment)
+                        if "parts" in part:
+                            extract_attachments(part)
+                elif payload.get("filename"):
+                    attachment = {
+                        "filename": payload["filename"],
+                        "mimeType": payload["mimeType"],
+                        "size": payload.get("body", {}).get("size", 0),
+                        "attachmentId": payload.get("body", {}).get("attachmentId")
+                    }
+                    logger.info(f"找到附件: {attachment}")
+                    attachments.append(attachment)
+
+            extract_attachments(message_data["payload"])
+            logger.info(f"總共找到 {len(attachments)} 個附件")
             
             # 解析郵件內容
             content = self._get_email_content(message_data["payload"])
@@ -137,7 +176,7 @@ class EmailService:
             return {
                 "id": message_id,
                 "subject": headers.get("subject", "(無主旨)"),
-                "from": headers.get("from", ""),
+                "from": f"{sender_name} <{sender_email}>",
                 "date": date,
                 "content": content,
                 "hasAttachments": bool(attachments),
@@ -248,65 +287,51 @@ class EmailService:
     async def get_email_details(self, message_id: str) -> Optional[Dict[str, Any]]:
         """獲取郵件詳細信息"""
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:  # 增加超時時間
-                response = await client.get(
-                    f"{self.base_url}/messages/{message_id}",
-                    params={"format": "full"},
-                    headers={"Authorization": f"Bearer {self.access_token}"}
-                )
-                
-                if response.status_code != 200:
-                    logger.error(f"獲取郵件詳細信息失敗: {response.text}")
-                    return None
-                
-                message_data = response.json()
-                headers = {header["name"].lower(): header["value"] 
-                          for header in message_data["payload"]["headers"]}
-                
-                # 解析附件信息
-                attachments = []
-                if "parts" in message_data["payload"]:
-                    for part in message_data["payload"]["parts"]:
-                        if "filename" in part and part["filename"]:
+            logger.info(f"開始獲取郵件詳細信息: message_id={message_id}, provider={self.provider}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                if self.provider == "GOOGLE":
+                    return await self._get_gmail_message(client, message_id)
+                else:
+                    # Microsoft Graph API
+                    response = await client.get(
+                        f"{self.base_url}/messages/{message_id}",
+                        params={
+                            "$expand": "attachments",
+                            "$select": "id,subject,from,receivedDateTime,body,hasAttachments,attachments"
+                        },
+                        headers={"Authorization": f"Bearer {self.access_token}"}
+                    )
+                    
+                    if response.status_code != 200:
+                        logger.error(f"獲取 Microsoft 郵件詳細信息失敗: {response.text}")
+                        return None
+                    
+                    msg = response.json()
+                    logger.info(f"獲取到 Microsoft 郵件資料: {msg.keys()}")
+                    
+                    attachments = []
+                    if msg.get("hasAttachments"):
+                        for att in msg.get("attachments", []):
                             attachments.append({
-                                "filename": part["filename"],
-                                "mimeType": part["mimeType"],
-                                "size": part.get("body", {}).get("size", 0),
-                                "attachmentId": part.get("body", {}).get("attachmentId")
+                                "filename": att.get("name", ""),
+                                "mimeType": att.get("contentType", ""),
+                                "size": att.get("size", 0),
+                                "attachmentId": att.get("id")
                             })
-                
-                # 解析郵件內容
-                content = ""
-                if "parts" in message_data["payload"]:
-                    for part in message_data["payload"]["parts"]:
-                        if part["mimeType"] == "text/plain":
-                            if "data" in part["body"]:
-                                content = base64.urlsafe_b64decode(
-                                    part["body"]["data"].encode("ASCII")
-                                ).decode("utf-8")
-                                break
-                elif "body" in message_data["payload"] and "data" in message_data["payload"]["body"]:
-                    content = base64.urlsafe_b64decode(
-                        message_data["payload"]["body"]["data"].encode("ASCII")
-                    ).decode("utf-8")
-                
-                # 解析日期
-                date_str = headers.get("date", "")
-                try:
-                    date = parsedate_to_datetime(date_str).isoformat()
-                except:
-                    date = datetime.now().isoformat()
-                
-                return {
-                    "id": message_id,
-                    "subject": headers.get("subject", "(無主旨)"),
-                    "from": headers.get("from", ""),
-                    "date": date,
-                    "content": content,
-                    "hasAttachments": bool(attachments),
-                    "attachments": attachments
-                }
+                            logger.info(f"找到附件: {attachments[-1]}")
+                    
+                    return {
+                        "id": msg["id"],
+                        "subject": msg.get("subject", "(無主旨)"),
+                        "from": f"{msg['from']['emailAddress'].get('name', '')} ({msg['from']['emailAddress']['address']})",
+                        "date": msg["receivedDateTime"],
+                        "content": msg["body"].get("content", ""),
+                        "hasAttachments": bool(attachments),
+                        "attachments": attachments
+                    }
                 
         except Exception as e:
             logger.error(f"獲取郵件詳細信息時發生錯誤: {str(e)}")
-            raise 
+            logger.exception("完整錯誤堆疊:")
+            return None 
