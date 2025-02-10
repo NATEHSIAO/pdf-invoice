@@ -1,0 +1,34 @@
+# cursorrules.md
+
+## 目的
+- 提供 AI 導覽專案文件的指引
+- 協助 AI 在專案開發中給出正確提示與導航
+
+## 專案概述
+- **應用功能**：登入 email、搜尋含「發票」信件、批量下載 PDF、解析發票資料、匯出 CSV
+- **技術棧**：
+  - 前端：React + TypeScript，使用 ShadCN UI 套件
+  - 後端：Python（Flask 或 FastAPI），處理 email 存取、PDF 解析與 CSV 生成
+  - Docker 化：前後端分容器部署
+
+## 導覽規則
+- **命名規範**：
+  - 前端檔案：元件採用 PascalCase（如 LoginPage.tsx）
+  - 後端檔案：採用 snake_case（如 app.py）
+- **模組劃分**：
+  - 前端頁面負責使用者介面與互動
+  - 後端 API 處理資料存取、解析及檔案生成
+- **路由與依賴**：
+  - React Router 管理前端頁面導向
+  - API 路由與前端互動：/login、/search、/progress、/result、/settings
+- **開發重點**：
+  - 保持前後端分工清楚
+  - 使用 Docker Compose 協同各服務
+
+## 使用提示
+- 參照「file structure.md」了解各檔案用途，並在開發過程中參考，如果有調整文件結構，請更新文件
+- 參照「prd.md」了解各頁面功能
+- 參照「API doc.md」了解各 API 功能
+- 參照「docker-compose.yml」了解各容器功能
+- 檢查 API 與 UI 元件的整合狀況
+- 注意環境變數與 Docker 設定以達一致部署效果
