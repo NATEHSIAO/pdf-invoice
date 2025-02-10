@@ -138,10 +138,13 @@ export default function DashboardPage() {
         
         try {
           if (email.from) {
-            const matches = email.from.match(/^(.*?)(?:\s*\((.*?)\))?$/)
+            const matches = email.from.match(/^(.*?)\s*<(.+?)>/)
             if (matches) {
               senderName = matches[1].trim()
-              senderEmail = matches[2] || matches[1]
+              senderEmail = matches[2].trim()
+            } else {
+              senderName = email.from
+              senderEmail = email.from
             }
           }
         } catch (error) {
@@ -324,7 +327,7 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <p className="truncate text-sm text-muted-foreground">
-                  {email.from_.name} ({email.from_.email})
+                  {email.from_.name} &lt;{email.from_.email}&gt;
                 </p>
               </div>
             </div>
