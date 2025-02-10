@@ -56,7 +56,13 @@ class EmailService:
             logger.info(f"Gmail API 響應狀態碼: {response.status_code}")
             logger.info(f"Gmail API 響應內容: {response.text[:500]}")  # 只記錄前500個字符
             
-            if response.status_code != 200:
+            if response.status_code == 401:
+                logger.error("認證失敗或 token 已過期")
+                raise Exception("Invalid Credentials")
+            elif response.status_code == 403:
+                logger.error("權限不足")
+                raise Exception("Permission Denied")
+            elif response.status_code != 200:
                 error_text = response.text
                 logger.error(f"Gmail 搜尋失敗: {error_text}")
                 raise Exception(f"Gmail API 錯誤: {error_text}")

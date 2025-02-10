@@ -1,11 +1,11 @@
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
 from pydantic import BaseModel, validator
 from datetime import datetime
 from typing import List, Dict, Any
 import logging
 import httpx
-from app.routes.auth import get_current_user
-from fastapi import Depends
+from app.routes.auth import oauth2_scheme
+from app.services.email import EmailService
 
 # 設定日誌
 logging.basicConfig(
@@ -107,34 +107,49 @@ def format_email_response(raw_emails: List[Dict[str, Any]]) -> List[EmailRespons
     
     for email in raw_emails:
         try:
+            logger.info(f"開始格式化郵件: {email.get('id', 'unknown')}")
+            
             # 解析寄件者資訊
-            sender_info = email.get("from", "").split(" <", 1)
-            sender_name = sender_info[0].strip()
-            sender_email = sender_info[1].rstrip(">") if len(sender_info) > 1 else sender_name
+            from_value = email.get("from", "")
+            logger.info(f"原始寄件者資訊: {from_value}")
+            
+            # 嘗試解析 "name <email>" 格式
+            if "<" in from_value and ">" in from_value:
+                sender_name = from_value.split("<")[0].strip()
+                sender_email = from_value.split("<")[1].split(">")[0].strip()
+            else:
+                # 如果沒有標準格式，使用整個值作為名稱和郵件
+                sender_name = from_value
+                sender_email = from_value
+            
+            logger.info(f"解析後的寄件者資訊: name={sender_name}, email={sender_email}")
             
             # 建立回應物件
             formatted_email = EmailResponse(
                 id=email["id"],
-                subject=email.get("subject", ""),
+                subject=email.get("subject", "（無主旨）"),
                 sender=EmailSender(
                     name=sender_name,
                     email=sender_email
                 ),
-                date=email["date"],
+                date=email.get("date", datetime.now().isoformat()),
                 content=email.get("content", ""),
                 has_attachments=bool(email.get("attachments")),
                 attachments=[
                     Attachment(
-                        filename=att["filename"],
-                        mime_type=att["mimeType"],
-                        size=att["size"]
+                        filename=att.get("filename", "unknown"),
+                        mime_type=att.get("mimeType", "application/octet-stream"),
+                        size=att.get("size", 0)
                     ) for att in email.get("attachments", [])
                 ]
             )
+            
+            logger.info(f"郵件格式化成功: {formatted_email.dict()}")
             formatted_emails.append(formatted_email)
             
         except Exception as e:
             logger.error(f"格式化郵件失敗: {str(e)}, email_id: {email.get('id', 'unknown')}")
+            logger.exception("完整錯誤堆疊:")
             continue
     
     return formatted_emails
@@ -172,44 +187,110 @@ async def verify_token(token: str, provider: str) -> bool:
 @router.post("/search", response_model=List[EmailResponse])
 async def search_emails(
     request: EmailSearchRequest,
-    token: str = Depends(get_current_user)
+    authorization: str = Header(None)
 ) -> List[EmailResponse]:
     """
     搜尋郵件 API
     
     參數:
     - request: 搜尋請求參數
-    - token: 通過 get_current_user 依賴獲取的認證令牌
+    - authorization: Bearer token
     
     返回:
     - List[EmailResponse]: 郵件列表
     """
     try:
-        logger.info(f"收到搜尋請求: {request}")
+        logger.info(f"收到搜尋請求，完整請求內容: {request}")
+        logger.info(f"Authorization 標頭: {authorization[:20]}..." if authorization else "無 Authorization 標頭")
+        
+        if not authorization or not authorization.startswith("Bearer "):
+            logger.error("未提供有效的認證令牌")
+            raise HTTPException(
+                status_code=401,
+                detail="未提供有效的認證令牌",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        token = authorization.split(" ")[1]
+        logger.info(f"使用 token: {token[:20]}...")
+        
+        # 驗證 token
+        try:
+            logger.info("開始驗證 token...")
+            async with httpx.AsyncClient() as client:
+                logger.info("發送 token 驗證請求到 Google API")
+                response = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/tokeninfo",
+                    params={"access_token": token}
+                )
+                
+                logger.info(f"Token 驗證響應狀態: {response.status_code}")
+                logger.info(f"Token 驗證響應內容: {response.text}")
+                
+                if response.status_code != 200:
+                    logger.error(f"Token 驗證失敗: {response.text}")
+                    raise HTTPException(
+                        status_code=401,
+                        detail="無效的認證令牌",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+                
+                token_info = response.json()
+                logger.info(f"Token 信息: {token_info}")
+                
+                required_scope = "https://www.googleapis.com/auth/gmail.readonly"
+                if required_scope not in token_info.get("scope", ""):
+                    logger.error(f"缺少必要的 scope: {required_scope}")
+                    logger.error(f"當前 scope: {token_info.get('scope', '')}")
+                    raise HTTPException(
+                        status_code=403,
+                        detail="缺少必要的郵件讀取權限"
+                    )
+        except httpx.RequestError as e:
+            logger.error(f"Token 驗證請求失敗: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"認證服務暫時無法使用: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Token 驗證過程發生未預期的錯誤: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Token 驗證失敗: {str(e)}"
+            )
         
         # 建立搜尋查詢
-        query = await build_search_query(request)
-        logger.info(f"搜尋查詢: {query}")
-        
         try:
+            query = await build_search_query(request)
+            logger.info(f"搜尋查詢: {query}")
+            
             # 初始化郵件服務並執行搜尋
-            from app.services.email import EmailService
+            logger.info("初始化郵件服務...")
             email_service = EmailService(token, request.provider)
+            
+            logger.info("執行郵件搜尋...")
             raw_emails = await email_service.search_emails(query)
+            logger.info(f"搜尋完成，原始郵件數量: {len(raw_emails)}")
             
             # 格式化並返回結果
+            logger.info("開始格式化郵件...")
             emails = format_email_response(raw_emails)
-            logger.info(f"成功搜尋到 {len(emails)} 封郵件")
+            logger.info(f"格式化完成，最終郵件數量: {len(emails)}")
+            
             return emails
             
         except Exception as service_error:
             logger.error(f"郵件服務錯誤: {str(service_error)}")
+            logger.exception("完整錯誤堆疊:")
             if "Invalid Credentials" in str(service_error):
                 raise HTTPException(
                     status_code=401,
                     detail="認證失敗，請重新登入"
                 )
-            raise
+            raise HTTPException(
+                status_code=500,
+                detail=f"郵件搜尋失敗: {str(service_error)}"
+            )
         
     except HTTPException as he:
         logger.error(f"HTTP 錯誤: {str(he)}")
@@ -217,6 +298,7 @@ async def search_emails(
     except Exception as e:
         error_msg = str(e)
         logger.error(f"未預期的錯誤: {error_msg}")
+        logger.exception("完整錯誤堆疊:")
         
         if "Invalid Credentials" in error_msg or "invalid_grant" in error_msg or "expired" in error_msg:
             raise HTTPException(status_code=401, detail="認證已過期或無效，請重新登入")

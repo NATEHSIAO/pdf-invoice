@@ -57,18 +57,34 @@ export default function DashboardPage() {
   const handleSearch = async () => {
     setIsLoading(true)
     try {
-      console.log("開始搜尋，參數:", {
+      const searchParams = {
+        provider: localStorage.getItem("auth_provider")?.toUpperCase() || "GOOGLE",
         keywords: searchKeywords,
-        dateRange,
+        dateRange: {
+          start: dateRange.start,
+          end: dateRange.end
+        },
         folder,
-      })
-
-      // 獲取 access_token
-      const access_token = localStorage.getItem("access_token")
-      
-      if (!access_token) {
-        throw new Error("請先登入")
       }
+      
+      console.log("搜尋參數:", JSON.stringify(searchParams, null, 2))
+
+      const access_token = localStorage.getItem("access_token")
+      if (!access_token) {
+        console.error("找不到 access token")
+        router.push("/auth/login")
+        return
+      }
+
+      console.log("準備發送請求到:", `${process.env.NEXT_PUBLIC_API_URL}/api/emails/search`)
+      console.log("完整請求配置:", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${access_token.substring(0, 10)}...`
+        },
+        body: JSON.stringify(searchParams)
+      })
 
       const response = await fetch("/api/emails/search", {
         method: "POST",
@@ -76,54 +92,79 @@ export default function DashboardPage() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${access_token}`
         },
-        body: JSON.stringify({
-          provider: localStorage.getItem("auth_provider")?.toUpperCase() || "GOOGLE",
-          keywords: searchKeywords,
-          dateRange: {
-            start: dateRange.start,
-            end: dateRange.end
-          },
-          folder,
-        })
+        body: JSON.stringify(searchParams)
       })
 
+      console.log("搜尋響應狀態:", response.status)
+      console.log("搜尋響應標頭:", Object.fromEntries(response.headers.entries()))
+
       if (!response.ok) {
-        const text = await response.text()
-        console.error("搜尋失敗:", text)
+        const errorText = await response.text()
+        console.error("搜尋失敗:", {
+          status: response.status,
+          statusText: response.statusText,
+          errorText
+        })
         
         if (response.status === 401) {
+          console.log("認證失敗，重新導向到登入頁面")
           localStorage.removeItem("access_token")
           router.push("/auth/login")
           return
         }
         
+        let errorMessage = "搜尋失敗"
         try {
-          const errorData = JSON.parse(text)
-          throw new Error(errorData.detail || "搜尋失敗")
-        } catch {
-          throw new Error("伺服器錯誤，請稍後再試")
+          const errorData = JSON.parse(errorText)
+          errorMessage = errorData.detail || errorMessage
+        } catch (e) {
+          console.error("解析錯誤回應失敗:", e)
         }
+        
+        throw new Error(errorMessage)
       }
 
       const data = await response.json()
-      console.log("搜尋結果:", data)
+      console.log("搜尋結果數量:", data.length)
+      console.log("原始郵件數據:", data)
 
-      const formattedEmails = (data as APIEmail[]).map((email: APIEmail) => ({
-        id: email.id,
-        subject: email.subject,
-        from_: {
-          name: email.from.split(" (")[0],
-          email: email.from.match(/\((.*?)\)/)?.[1] || email.from
-        },
-        date: email.date,
-        content: email.content || "",
-        hasAttachments: email.hasAttachments,
-        attachments: email.attachments?.map(att => ({
-          filename: att.filename,
-          mime_type: att.mimeType,
-          size: att.size
-        })) || []
-      }))
+      const formattedEmails = (data as APIEmail[]).map((email: APIEmail) => {
+        // 添加日誌
+        console.log("處理郵件:", email)
+        
+        // 安全地解析寄件者信息
+        let senderName = "未知寄件者"
+        let senderEmail = ""
+        
+        try {
+          if (email.from) {
+            const matches = email.from.match(/^(.*?)(?:\s*\((.*?)\))?$/)
+            if (matches) {
+              senderName = matches[1].trim()
+              senderEmail = matches[2] || matches[1]
+            }
+          }
+        } catch (error) {
+          console.error("解析寄件者信息失敗:", error)
+        }
+
+        return {
+          id: email.id,
+          subject: email.subject || "（無主旨）",
+          from_: {
+            name: senderName,
+            email: senderEmail
+          },
+          date: email.date,
+          content: email.content || "",
+          hasAttachments: email.hasAttachments || false,
+          attachments: email.attachments?.map(att => ({
+            filename: att.filename,
+            mime_type: att.mimeType,
+            size: att.size
+          })) || []
+        }
+      })
       
       console.log("格式化後的郵件:", formattedEmails)
       setEmails(formattedEmails)

@@ -39,6 +39,7 @@ export default function CallbackPage({
         
         console.log("認證成功，儲存 token")
         localStorage.setItem("access_token", result.access_token)
+        localStorage.setItem("auth_provider", provider)
         router.push("/dashboard")
       } catch (error) {
         console.error("認證處理失敗:", error)
