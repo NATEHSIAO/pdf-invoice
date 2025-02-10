@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import List, Dict, Any
 import logging
 import httpx
+from app.routes.auth import get_current_user
+from fastapi import Depends
 
 # 設定日誌
 logging.basicConfig(
@@ -170,47 +172,20 @@ async def verify_token(token: str, provider: str) -> bool:
 @router.post("/search", response_model=List[EmailResponse])
 async def search_emails(
     request: EmailSearchRequest,
-    authorization: str = Header(..., description="Bearer token")
+    token: str = Depends(get_current_user)
 ) -> List[EmailResponse]:
     """
     搜尋郵件 API
     
     參數:
     - request: 搜尋請求參數
-    - authorization: Bearer token
+    - token: 通過 get_current_user 依賴獲取的認證令牌
     
     返回:
     - List[EmailResponse]: 郵件列表
     """
     try:
         logger.info(f"收到搜尋請求: {request}")
-        
-        # 驗證 authorization header
-        if not authorization or not authorization.startswith("Bearer "):
-            logger.error("認證格式錯誤")
-            raise HTTPException(
-                status_code=401,
-                detail="無效的認證格式，請使用 Bearer token"
-            )
-        
-        token = authorization.split(" ")[1]
-        if not token:
-            logger.error("Token 為空")
-            raise HTTPException(
-                status_code=401,
-                detail="認證 token 不能為空"
-            )
-            
-        logger.info(f"使用 token: {token[:10]}...")
-        
-        # 驗證 token
-        is_valid = await verify_token(token, request.provider)
-        if not is_valid:
-            logger.error("Token 驗證失敗")
-            raise HTTPException(
-                status_code=401,
-                detail="認證失敗，請重新登入"
-            )
         
         # 建立搜尋查詢
         query = await build_search_query(request)
