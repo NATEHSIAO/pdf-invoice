@@ -15,7 +15,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 class OAuthCallback(BaseModel):
     code: str
-    provider: str
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     if not token:
@@ -26,29 +25,40 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         )
     
     try:
-        # 驗證 token
         async with httpx.AsyncClient() as client:
-            response = await client.get(
+            # 嘗試驗證 Google Token
+            google_response = await client.get(
                 "https://www.googleapis.com/oauth2/v3/tokeninfo",
                 params={"access_token": token}
             )
             
-            if response.status_code != 200:
-                logger.error(f"Token 驗證失敗: {response.text}")
-                raise HTTPException(
-                    status_code=401,
-                    detail="無效的認證令牌",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+            if google_response.status_code == 200:
+                token_info = google_response.json()
+                required_scope = "https://www.googleapis.com/auth/gmail.readonly"
+                if required_scope not in token_info.get("scope", ""):
+                    logger.error(f"缺少必要的 scope: {required_scope}")
+                    raise HTTPException(
+                        status_code=403,
+                        detail="缺少必要的郵件讀取權限"
+                    )
+                return token
             
-            token_info = response.json()
-            required_scope = "https://www.googleapis.com/auth/gmail.readonly"
-            if required_scope not in token_info.get("scope", ""):
-                logger.error(f"缺少必要的 scope: {required_scope}")
-                raise HTTPException(
-                    status_code=403,
-                    detail="缺少必要的郵件讀取權限"
-                )
+            # 如果不是 Google Token，嘗試驗證 Microsoft Token
+            ms_response = await client.get(
+                "https://graph.microsoft.com/v1.0/me",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            
+            if ms_response.status_code == 200:
+                return token
+            
+            # 如果兩種驗證都失敗
+            logger.error("Token 驗證失敗：既不是有效的 Google Token 也不是有效的 Microsoft Token")
+            raise HTTPException(
+                status_code=401,
+                detail="無效的認證令牌",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
                 
     except HTTPException:
         raise
@@ -62,12 +72,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             
     return token
 
-@router.post("/auth/callback")
-async def oauth_callback(data: OAuthCallback):
+@router.post("/auth/callback/{provider}")
+async def oauth_callback(provider: str, data: OAuthCallback):
     try:
-        logger.info(f"收到 OAuth 回調請求: provider={data.provider}, code={data.code[:10]}...")
+        logger.info(f"收到 OAuth 回調請求: provider={provider}, code={data.code[:10]}...")
         
-        if data.provider == "GOOGLE":
+        if provider.upper() == "GOOGLE":
             token_url = "https://oauth2.googleapis.com/token"
             client_id = os.getenv("GOOGLE_CLIENT_ID")
             client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
@@ -157,7 +167,7 @@ async def oauth_callback(data: OAuthCallback):
                     },
                 }
                 
-        elif data.provider == "MICROSOFT":
+        elif provider.upper() == "MICROSOFT":
             token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
             client_id = os.getenv("MICROSOFT_CLIENT_ID")
             client_secret = os.getenv("MICROSOFT_CLIENT_SECRET")

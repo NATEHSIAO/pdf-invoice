@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import httpx
 import base64
 import logging
@@ -19,15 +19,19 @@ class EmailService:
         else:
             raise ValueError(f"不支援的郵件提供者: {provider}")
         
-    async def search_emails(self, query: str) -> List[Dict[str, Any]]:
+    async def search_emails(self, query: Union[str, Dict[str, str]]) -> List[Dict[str, Any]]:
         """搜尋郵件"""
         try:
             logger.info(f"搜尋查詢: {query} (提供者: {self.provider})")
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 if self.provider == "GOOGLE":
+                    if isinstance(query, dict):
+                        raise ValueError("Google 搜尋需要字串格式的查詢")
                     return await self._search_gmail(client, query)
                 else:
+                    if isinstance(query, str):
+                        raise ValueError("Microsoft 搜尋需要字典格式的查詢")
                     return await self._search_microsoft(client, query)
                     
         except Exception as e:
@@ -212,54 +216,96 @@ class EmailService:
         
         return ""
 
-    async def _search_microsoft(self, client: httpx.AsyncClient, query: str) -> List[Dict[str, Any]]:
+    async def _search_microsoft(self, client: httpx.AsyncClient, query: Dict[str, str]) -> List[Dict[str, Any]]:
         """Microsoft Graph API 搜尋實作"""
-        search_query = f"$search=\"{query}\""
-        response = await client.get(
-            f"{self.base_url}/messages",
-            params={
-                "$filter": search_query,
-                "$top": 50,
-                "$select": "id,subject,from,receivedDateTime,body,hasAttachments"
-            },
-            headers={
-                "Authorization": f"Bearer {self.access_token}",
-                "Accept": "application/json"
-            }
-        )
-        
-        if response.status_code != 200:
-            error_text = response.text
-            logger.error(f"Microsoft 搜尋失敗: {error_text}")
-            raise Exception(f"Microsoft Graph API 錯誤: {error_text}")
-        
-        data = response.json()
-        messages = data.get("value", [])
-        logger.info(f"Microsoft 找到 {len(messages)} 封郵件")
-        
-        formatted_emails = []
-        for msg in messages:
-            try:
-                formatted_email = {
-                    "id": msg["id"],
-                    "subject": msg.get("subject", "(無主旨)"),
-                    "from": f"{msg['from']['emailAddress'].get('name', '')} ({msg['from']['emailAddress']['address']})",
-                    "date": msg["receivedDateTime"],
-                    "content": msg["body"].get("content", ""),
-                    "hasAttachments": msg.get("hasAttachments", False),
-                    "attachments": []
+        try:
+            logger.info(f"執行 Microsoft Graph API 搜尋: {query}")
+            
+            # 先只獲取基本郵件資訊
+            response = await client.get(
+                f"{self.base_url}/messages",
+                params={
+                    **query,
+                    "$select": "id,subject,from,receivedDateTime,body,hasAttachments"
+                },
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Accept": "application/json",
+                    "ConsistencyLevel": "eventual",
+                    "Prefer": "outlook.body-content-type=\"text\""
                 }
-                
-                if msg.get("hasAttachments"):
-                    attachments = await self._get_microsoft_attachments(client, msg["id"])
-                    formatted_email["attachments"] = attachments
+            )
+            
+            if response.status_code != 200:
+                error_text = response.text
+                logger.error(f"Microsoft 搜尋失敗: {error_text}")
+                raise Exception(f"Microsoft Graph API 錯誤: {error_text}")
+            
+            data = response.json()
+            messages = data.get("value", [])
+            logger.info(f"Microsoft 找到 {len(messages)} 封郵件")
+            
+            formatted_messages = []
+            for msg in messages:
+                try:
+                    msg_id = msg.get("id")
+                    logger.info(f"處理郵件 ID: {msg_id}")
                     
-                formatted_emails.append(formatted_email)
-            except Exception as e:
-                logger.error(f"處理 Microsoft 郵件失敗: {str(e)}")
-                continue
-                
-        return formatted_emails
+                    # 格式化郵件基本資訊
+                    formatted_email = {
+                        "id": msg_id,
+                        "subject": msg.get("subject", "(無主旨)"),
+                        "from": f"{msg['from']['emailAddress'].get('name', '')} <{msg['from']['emailAddress']['address']}>",
+                        "date": msg["receivedDateTime"],
+                        "content": msg.get("body", {}).get("content", ""),
+                        "hasAttachments": msg.get("hasAttachments", False),
+                        "attachments": []
+                    }
+                    
+                    # 如果有附件，單獨獲取附件資訊
+                    if formatted_email["hasAttachments"]:
+                        try:
+                            # 使用單獨的請求獲取附件資訊
+                            att_response = await client.get(
+                                f"{self.base_url}/messages/{msg_id}/attachments",
+                                headers={
+                                    "Authorization": f"Bearer {self.access_token}",
+                                    "Accept": "application/json"
+                                }
+                            )
+                            
+                            if att_response.status_code == 200:
+                                att_data = att_response.json()
+                                attachments = []
+                                for att in att_data.get("value", []):
+                                    attachment = {
+                                        "filename": att.get("name", ""),
+                                        "mimeType": att.get("contentType", ""),
+                                        "size": att.get("size", 0),
+                                        "attachmentId": att.get("id")
+                                    }
+                                    attachments.append(attachment)
+                                    logger.info(f"找到附件: {attachment}")
+                                formatted_email["attachments"] = attachments
+                            else:
+                                logger.error(f"獲取附件資訊失敗: {att_response.text}")
+                        except Exception as att_error:
+                            logger.error(f"處理附件時發生錯誤: {str(att_error)}")
+                    
+                    formatted_messages.append(formatted_email)
+                    logger.info(f"成功處理郵件 ID: {msg_id}")
+                    
+                except Exception as msg_error:
+                    logger.error(f"處理郵件時發生錯誤: {str(msg_error)}, 郵件 ID: {msg.get('id')}")
+                    logger.error(f"郵件資料: {msg}")
+                    continue
+            
+            logger.info(f"成功格式化 {len(formatted_messages)}/{len(messages)} 封郵件")
+            return formatted_messages
+            
+        except Exception as e:
+            logger.error(f"Microsoft Graph API 搜尋過程發生錯誤: {str(e)}")
+            raise
 
     async def _get_microsoft_attachments(self, client: httpx.AsyncClient, message_id: str) -> List[Dict[str, Any]]:
         """獲取 Microsoft 郵件附件信息"""
@@ -294,39 +340,79 @@ class EmailService:
                     return await self._get_gmail_message(client, message_id)
                 else:
                     # Microsoft Graph API
+                    logger.info(f"獲取 Microsoft 郵件詳細信息: {message_id}")
+                    
+                    # URL 編碼郵件 ID
+                    import urllib.parse
+                    encoded_message_id = urllib.parse.quote(message_id)
+                    
+                    # 使用 v1.0 端點
                     response = await client.get(
-                        f"{self.base_url}/messages/{message_id}",
+                        f"https://graph.microsoft.com/v1.0/me/messages/{encoded_message_id}",
                         params={
-                            "$expand": "attachments",
-                            "$select": "id,subject,from,receivedDateTime,body,hasAttachments,attachments"
+                            "$select": "id,subject,from,receivedDateTime,body,hasAttachments"
                         },
-                        headers={"Authorization": f"Bearer {self.access_token}"}
+                        headers={
+                            "Authorization": f"Bearer {self.access_token}",
+                            "Accept": "application/json",
+                            "Prefer": "outlook.body-content-type=\"text\"",
+                            "ConsistencyLevel": "eventual"
+                        }
                     )
                     
-                    if response.status_code != 200:
-                        logger.error(f"獲取 Microsoft 郵件詳細信息失敗: {response.text}")
+                    if response.status_code == 404:
+                        logger.error(f"郵件不存在: {message_id}")
+                        return None
+                    elif response.status_code == 401:
+                        logger.error("認證失敗或 token 已過期")
+                        raise Exception("Invalid Credentials")
+                    elif response.status_code == 403:
+                        logger.error("權限不足")
+                        raise Exception("Permission Denied")
+                    elif response.status_code != 200:
+                        error_text = response.text
+                        logger.error(f"獲取 Microsoft 郵件詳細信息失敗: {error_text}")
                         return None
                     
                     msg = response.json()
                     logger.info(f"獲取到 Microsoft 郵件資料: {msg.keys()}")
                     
+                    # 獲取附件資訊
                     attachments = []
                     if msg.get("hasAttachments"):
-                        for att in msg.get("attachments", []):
-                            attachments.append({
-                                "filename": att.get("name", ""),
-                                "mimeType": att.get("contentType", ""),
-                                "size": att.get("size", 0),
-                                "attachmentId": att.get("id")
-                            })
-                            logger.info(f"找到附件: {attachments[-1]}")
+                        try:
+                            att_response = await client.get(
+                                f"https://graph.microsoft.com/v1.0/me/messages/{encoded_message_id}/attachments",
+                                headers={
+                                    "Authorization": f"Bearer {self.access_token}",
+                                    "Accept": "application/json",
+                                    "ConsistencyLevel": "eventual"
+                                }
+                            )
+                            
+                            if att_response.status_code == 200:
+                                att_data = att_response.json()
+                                for att in att_data.get("value", []):
+                                    attachment = {
+                                        "filename": att.get("name", ""),
+                                        "mimeType": att.get("contentType", ""),
+                                        "size": att.get("size", 0),
+                                        "attachmentId": att.get("id")
+                                    }
+                                    attachments.append(attachment)
+                                    logger.info(f"找到附件: {attachment}")
+                            else:
+                                logger.error(f"獲取附件資訊失敗: {att_response.text}")
+                        except Exception as att_error:
+                            logger.error(f"處理附件時發生錯誤: {str(att_error)}")
+                            logger.exception("附件錯誤堆疊:")
                     
                     return {
                         "id": msg["id"],
                         "subject": msg.get("subject", "(無主旨)"),
-                        "from": f"{msg['from']['emailAddress'].get('name', '')} ({msg['from']['emailAddress']['address']})",
+                        "from": f"{msg['from']['emailAddress'].get('name', '')} <{msg['from']['emailAddress']['address']}>",
                         "date": msg["receivedDateTime"],
-                        "content": msg["body"].get("content", ""),
+                        "content": msg.get("body", {}).get("content", ""),
                         "hasAttachments": bool(attachments),
                         "attachments": attachments
                     }

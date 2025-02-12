@@ -19,7 +19,7 @@ app.add_middleware(
 )
 
 # 包含路由
-app.include_router(auth.router, prefix="/api")
+app.include_router(auth.router)
 app.include_router(email.router, prefix="/api")
 app.include_router(pdf.router, prefix="/api")
 

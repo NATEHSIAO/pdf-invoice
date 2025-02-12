@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Header, Depends
 from pydantic import BaseModel, validator
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 import logging
 import httpx
 from app.routes.auth import oauth2_scheme
@@ -71,33 +71,43 @@ class EmailResponse(BaseModel):
     attachments: List[Attachment] = []
 
 # 輔助函數
-async def build_search_query(request: EmailSearchRequest) -> str:
+async def build_search_query(request: EmailSearchRequest) -> Union[str, Dict[str, str]]:
     """建立搜尋查詢字串"""
     start_date = request.dateRange.start.replace("-", "/")
     end_date = request.dateRange.end.replace("-", "/")
     
-    query_parts = []
-    
     if request.provider == "GOOGLE":
         # Gmail 查詢格式
-        query_parts.extend([
+        query_parts = [
             f'subject:"{request.keywords}"',
             f'after:{start_date}',
             f'before:{end_date}'
-        ])
+        ]
         if request.folder != "INBOX":
             query_parts.append(f'in:{request.folder}')
+        query = " ".join(query_parts)
     else:
         # Microsoft Graph API 查詢格式
-        query_parts.extend([
-            f'subject:"{request.keywords}"',
-            f'received>={start_date}',
-            f'received<={end_date}'
-        ])
+        # 參考: https://learn.microsoft.com/zh-tw/graph/api/message-list
+        
+        # 使用 $filter 進行日期和主旨過濾
+        filter_conditions = [
+            f"receivedDateTime ge {request.dateRange.start}T00:00:00Z",
+            f"receivedDateTime le {request.dateRange.end}T23:59:59Z",
+            f"contains(subject, '{request.keywords}')"
+        ]
+        
+        query = {
+            "$filter": " and ".join(filter_conditions),
+            "$select": "id,subject,from,receivedDateTime,body,hasAttachments",
+            "$orderby": "receivedDateTime desc",
+            "$top": 50
+        }
+        
+        # 如果不是收件匣，需要指定資料夾
         if request.folder != "INBOX":
-            query_parts.append(f'folder:{request.folder}')
+            query["folderPath"] = request.folder
     
-    query = " ".join(query_parts)
     logger.info(f"構建查詢字串: {query} (提供者: {request.provider})")
     return query
 
@@ -218,34 +228,67 @@ async def search_emails(
         try:
             logger.info("開始驗證 token...")
             async with httpx.AsyncClient() as client:
-                logger.info("發送 token 驗證請求到 Google API")
-                response = await client.get(
-                    "https://www.googleapis.com/oauth2/v3/tokeninfo",
-                    params={"access_token": token}
-                )
-                
-                logger.info(f"Token 驗證響應狀態: {response.status_code}")
-                logger.info(f"Token 驗證響應內容: {response.text}")
-                
-                if response.status_code != 200:
-                    logger.error(f"Token 驗證失敗: {response.text}")
-                    raise HTTPException(
-                        status_code=401,
-                        detail="無效的認證令牌",
-                        headers={"WWW-Authenticate": "Bearer"},
+                if request.provider == "GOOGLE":
+                    logger.info("發送 token 驗證請求到 Google API")
+                    response = await client.get(
+                        "https://www.googleapis.com/oauth2/v3/tokeninfo",
+                        params={"access_token": token}
                     )
-                
-                token_info = response.json()
-                logger.info(f"Token 信息: {token_info}")
-                
-                required_scope = "https://www.googleapis.com/auth/gmail.readonly"
-                if required_scope not in token_info.get("scope", ""):
-                    logger.error(f"缺少必要的 scope: {required_scope}")
-                    logger.error(f"當前 scope: {token_info.get('scope', '')}")
-                    raise HTTPException(
-                        status_code=403,
-                        detail="缺少必要的郵件讀取權限"
+                    
+                    logger.info(f"Token 驗證響應狀態: {response.status_code}")
+                    logger.info(f"Token 驗證響應內容: {response.text}")
+                    
+                    if response.status_code != 200:
+                        logger.error(f"Token 驗證失敗: {response.text}")
+                        raise HTTPException(
+                            status_code=401,
+                            detail="無效的認證令牌",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                    
+                    token_info = response.json()
+                    logger.info(f"Token 信息: {token_info}")
+                    
+                    required_scope = "https://www.googleapis.com/auth/gmail.readonly"
+                    if required_scope not in token_info.get("scope", ""):
+                        logger.error(f"缺少必要的 scope: {required_scope}")
+                        logger.error(f"當前 scope: {token_info.get('scope', '')}")
+                        raise HTTPException(
+                            status_code=403,
+                            detail="缺少必要的郵件讀取權限"
+                        )
+                else:
+                    # Microsoft Token 驗證
+                    logger.info("發送 token 驗證請求到 Microsoft Graph API")
+                    response = await client.get(
+                        "https://graph.microsoft.com/v1.0/me",
+                        headers={"Authorization": f"Bearer {token}"}
                     )
+                    
+                    logger.info(f"Token 驗證響應狀態: {response.status_code}")
+                    logger.info(f"Token 驗證響應內容: {response.text}")
+                    
+                    if response.status_code != 200:
+                        logger.error(f"Token 驗證失敗: {response.text}")
+                        raise HTTPException(
+                            status_code=401,
+                            detail="無效的認證令牌",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                    
+                    # 檢查郵件讀取權限
+                    permissions_response = await client.get(
+                        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages",
+                        headers={"Authorization": f"Bearer {token}"}
+                    )
+                    
+                    if permissions_response.status_code != 200:
+                        logger.error("缺少郵件讀取權限")
+                        raise HTTPException(
+                            status_code=403,
+                            detail="缺少必要的郵件讀取權限"
+                        )
+                    
         except httpx.RequestError as e:
             logger.error(f"Token 驗證請求失敗: {str(e)}")
             raise HTTPException(
