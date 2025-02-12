@@ -214,7 +214,6 @@ export default function DashboardPage() {
 
   return (
     <div className="container mx-auto p-4 space-y-6">
-      {/* 搜尋條件區塊 */}
       <div className="rounded-lg border p-4 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">搜尋條件</h2>
@@ -276,7 +275,6 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* 郵件列表區塊 */}
       <div className="rounded-lg border">
         <div className="border-b p-4 flex items-center justify-between">
           <div className="flex items-center space-x-4">
