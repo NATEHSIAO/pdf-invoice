@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { PaperclipIcon, X } from "lucide-react"
+import { PaperclipIcon, X, LogOut } from "lucide-react"
 import { format } from "date-fns"
 import { zhTW } from "date-fns/locale"
 
@@ -20,7 +20,7 @@ interface Attachment {
 interface Email {
   id: string
   subject: string
-  from_: EmailSender
+  sender: EmailSender
   date: string
   content: string
   hasAttachments: boolean
@@ -30,10 +30,13 @@ interface Email {
 interface APIEmail {
   id: string
   subject: string
-  from: string
+  sender: {
+    name: string
+    email: string
+  }
   date: string
   content: string
-  hasAttachments: boolean
+  has_attachments: boolean
   attachments: Array<{
     filename: string
     mimeType: string
@@ -129,44 +132,27 @@ export default function DashboardPage() {
       console.log("原始郵件數據:", data)
 
       const formattedEmails = (data as APIEmail[]).map((email: APIEmail) => {
-        // 添加日誌
-        console.log("處理郵件:", email)
+        console.log("原始郵件資料:", email)
         
-        // 安全地解析寄件者信息
-        let senderName = "未知寄件者"
-        let senderEmail = ""
-        
-        try {
-          if (email.from) {
-            const matches = email.from.match(/^(.*?)\s*<(.+?)>/)
-            if (matches) {
-              senderName = matches[1].trim()
-              senderEmail = matches[2].trim()
-            } else {
-              senderName = email.from
-              senderEmail = email.from
-            }
-          }
-        } catch (error) {
-          console.error("解析寄件者信息失敗:", error)
-        }
-
-        return {
+        const formattedEmail = {
           id: email.id,
           subject: email.subject || "（無主旨）",
-          from_: {
-            name: senderName,
-            email: senderEmail
+          sender: {
+            name: email.sender?.name || "未知寄件者",
+            email: email.sender?.email || ""
           },
           date: email.date,
           content: email.content || "",
-          hasAttachments: email.hasAttachments || false,
+          hasAttachments: email.has_attachments || false,
           attachments: email.attachments?.map(att => ({
             filename: att.filename,
             mime_type: att.mimeType,
             size: att.size
           })) || []
         }
+        
+        console.log("格式化後的單封郵件:", formattedEmail)
+        return formattedEmail
       })
       
       console.log("格式化後的郵件:", formattedEmails)
@@ -221,11 +207,25 @@ export default function DashboardPage() {
     return `${size.toFixed(1)} ${units[unitIndex]}`
   }
 
+  const handleLogout = () => {
+    localStorage.removeItem("access_token")
+    router.push("/auth/login")
+  }
+
   return (
     <div className="container mx-auto p-4 space-y-6">
       {/* 搜尋條件區塊 */}
       <div className="rounded-lg border p-4 space-y-4">
-        <h2 className="text-lg font-semibold">搜尋條件</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">搜尋條件</h2>
+          <button
+            onClick={handleLogout}
+            className="flex items-center text-sm text-muted-foreground hover:text-foreground"
+          >
+            <LogOut className="h-4 w-4 mr-1" />
+            登出
+          </button>
+        </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-2">
             <label className="text-sm font-medium">關鍵字</label>
@@ -327,7 +327,7 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <p className="truncate text-sm text-muted-foreground">
-                  {email.from_.name} &lt;{email.from_.email}&gt;
+                  {email.sender.name} &lt;{email.sender.email}&gt;
                 </p>
               </div>
             </div>
@@ -355,8 +355,8 @@ export default function DashboardPage() {
             </div>
             <div className="flex-1 overflow-auto p-4 space-y-4">
               <div>
-                <p className="font-medium">{selectedEmail.from_.name}</p>
-                <p className="text-sm text-muted-foreground">{selectedEmail.from_.email}</p>
+                <p className="font-medium">{selectedEmail.sender.name}</p>
+                <p className="text-sm text-muted-foreground">{selectedEmail.sender.email}</p>
               </div>
               <div>
                 <p className="font-medium">主旨</p>

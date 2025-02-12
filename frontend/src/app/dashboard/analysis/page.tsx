@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft, Download, FileDown, Loader2 } from "lucide-react"
+import { ArrowLeft, Download, FileDown, Loader2, LogOut } from "lucide-react"
 import { format } from "date-fns"
 import { zhTW } from "date-fns/locale"
 
@@ -102,6 +102,11 @@ function AnalysisContent() {
     pollProgress()
   }, [searchParams, router])
 
+  const handleLogout = () => {
+    localStorage.removeItem("access_token")
+    router.push("/auth/login")
+  }
+
   const handleDownloadCSV = () => {
     if (!result?.invoices) return
 
@@ -164,23 +169,32 @@ function AnalysisContent() {
           <ArrowLeft className="h-4 w-4 mr-1" />
           返回搜尋
         </button>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-4">
           <button
-            onClick={handleDownloadCSV}
-            disabled={!result?.invoices}
-            className="flex items-center rounded-md bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50"
+            onClick={handleLogout}
+            className="flex items-center text-sm text-muted-foreground hover:text-foreground"
           >
-            <FileDown className="h-4 w-4 mr-1" />
-            下載 CSV
+            <LogOut className="h-4 w-4 mr-1" />
+            登出
           </button>
-          <button
-            onClick={handleDownloadPDFs}
-            disabled={!result?.download_url}
-            className="flex items-center rounded-md border px-4 py-2 text-sm hover:bg-muted disabled:opacity-50"
-          >
-            <Download className="h-4 w-4 mr-1" />
-            下載 PDF
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleDownloadCSV}
+              disabled={!result?.invoices}
+              className="flex items-center rounded-md bg-primary px-4 py-2 text-sm text-white hover:bg-primary/90 disabled:opacity-50"
+            >
+              <FileDown className="h-4 w-4 mr-1" />
+              下載 CSV
+            </button>
+            <button
+              onClick={handleDownloadPDFs}
+              disabled={!result?.download_url}
+              className="flex items-center rounded-md border px-4 py-2 text-sm hover:bg-muted disabled:opacity-50"
+            >
+              <Download className="h-4 w-4 mr-1" />
+              下載 PDF
+            </button>
+          </div>
         </div>
       </div>
 
