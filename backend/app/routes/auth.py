@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Response, Depends
+from fastapi import APIRouter, HTTPException, Response, Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 import httpx
 import logging
 import os
+import requests
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -73,171 +74,104 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     return token
 
 @router.post("/auth/callback/{provider}")
-async def oauth_callback(provider: str, data: OAuthCallback):
+async def oauth_callback(provider: str, request: Request):
     try:
-        logger.info(f"收到 OAuth 回調請求: provider={provider}, code={data.code[:10]}...")
+        data = await request.json()
+        code = data.get("code")
         
+        if not code:
+            raise HTTPException(status_code=400, detail="Authorization code is required")
+        
+        # 根據提供者獲取配置
         if provider.upper() == "GOOGLE":
-            token_url = "https://oauth2.googleapis.com/token"
-            client_id = os.getenv("GOOGLE_CLIENT_ID")
+            client_id = os.getenv("NEXT_PUBLIC_GOOGLE_CLIENT_ID")
             client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
-            redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/auth/callback/google")
-            
-            logger.info(f"Google OAuth 配置: client_id={client_id[:10]}..., redirect_uri={redirect_uri}")
-            
-            if not client_id or not client_secret:
-                logger.error("缺少 Google OAuth 配置")
-                raise HTTPException(status_code=500, detail="缺少 OAuth 配置")
-            
-            logger.info("開始交換 Google access token")
-            async with httpx.AsyncClient() as client:
-                token_data = {
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "code": data.code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": redirect_uri,
-                    "scope": "https://www.googleapis.com/auth/gmail.readonly email profile",
-                }
-                logger.info(f"發送 token 請求: {token_url}")
-                logger.info(f"請求資料: {token_data}")
-                
-                token_response = await client.post(token_url, data=token_data)
-                
-                logger.info(f"Token 回應狀態: {token_response.status_code}")
-                logger.info(f"Token 回應內容: {token_response.text}")
-                
-                if token_response.status_code != 200:
-                    logger.error(f"Google token 請求失敗: {token_response.text}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"無法獲取 access token: {token_response.text}"
-                    )
-                
-                token_data = token_response.json()
-                logger.info("成功獲取 Google access token")
-                
-                # 驗證 token
-                token_info_response = await client.get(
-                    "https://www.googleapis.com/oauth2/v3/tokeninfo",
-                    params={"access_token": token_data["access_token"]}
-                )
-                
-                logger.info(f"Token 驗證回應狀態: {token_info_response.status_code}")
-                logger.info(f"Token 驗證回應內容: {token_info_response.text}")
-                
-                if token_info_response.status_code != 200:
-                    logger.error(f"Token 驗證失敗: {token_info_response.text}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Token 驗證失敗"
-                    )
-                    
-                token_info = token_info_response.json()
-                
-                # 獲取用戶信息
-                user_info_response = await client.get(
-                    "https://www.googleapis.com/oauth2/v2/userinfo",
-                    headers={"Authorization": f"Bearer {token_data['access_token']}"},
-                )
-                
-                logger.info(f"用戶信息回應狀態: {user_info_response.status_code}")
-                
-                if user_info_response.status_code != 200:
-                    logger.error(f"獲取用戶信息失敗: {user_info_response.text}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail="無法獲取用戶信息"
-                    )
-                
-                user_info = user_info_response.json()
-                logger.info("成功獲取用戶信息")
-                
-                return {
-                    "access_token": token_data["access_token"],
-                    "token_type": "bearer",
-                    "expires_in": token_data.get("expires_in", 3600),
-                    "refresh_token": token_data.get("refresh_token"),
-                    "provider": "GOOGLE",
-                    "user": {
-                        "id": user_info["id"],
-                        "email": user_info["email"],
-                        "name": user_info.get("name"),
-                        "picture": user_info.get("picture"),
-                    },
-                }
-                
+            token_url = "https://oauth2.googleapis.com/token"
         elif provider.upper() == "MICROSOFT":
-            token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-            client_id = os.getenv("MICROSOFT_CLIENT_ID")
+            client_id = os.getenv("NEXT_PUBLIC_MICROSOFT_CLIENT_ID")
             client_secret = os.getenv("MICROSOFT_CLIENT_SECRET")
-            redirect_uri = os.getenv("MICROSOFT_REDIRECT_URI", "http://localhost:3000/auth/callback/microsoft")
-            
-            if not client_id or not client_secret:
-                logger.error("缺少 Microsoft OAuth 配置")
-                raise HTTPException(status_code=500, detail="缺少 OAuth 配置")
-            
-            logger.info("開始交換 Microsoft access token")
-            async with httpx.AsyncClient() as client:
-                token_response = await client.post(
-                    token_url,
-                    data={
-                        "client_id": client_id,
-                        "client_secret": client_secret,
-                        "code": data.code,
-                        "grant_type": "authorization_code",
-                        "redirect_uri": redirect_uri,
-                        "scope": "openid profile email Mail.Read",
-                    },
-                )
-                
-                if token_response.status_code != 200:
-                    logger.error(f"Microsoft token 請求失敗: {token_response.text}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"無法獲取 access token: {token_response.text}"
-                    )
-                
-                token_data = token_response.json()
-                logger.info("成功獲取 Microsoft access token")
-                
-                # 獲取用戶信息
-                user_info_response = await client.get(
-                    "https://graph.microsoft.com/v1.0/me",
-                    headers={"Authorization": f"Bearer {token_data['access_token']}"},
-                )
-                
-                if user_info_response.status_code != 200:
-                    logger.error(f"獲取 Microsoft 用戶信息失敗: {user_info_response.text}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail="無法獲取用戶信息"
-                    )
-                
-                user_info = user_info_response.json()
-                logger.info("成功獲取 Microsoft 用戶信息")
-                
-                return {
-                    "access_token": token_data["access_token"],
-                    "token_type": "bearer",
-                    "expires_in": token_data.get("expires_in", 3600),
-                    "refresh_token": token_data.get("refresh_token"),
-                    "user": {
-                        "id": user_info["id"],
-                        "email": user_info["userPrincipalName"],
-                        "name": user_info.get("displayName"),
-                        "picture": None,
-                    },
-                }
-        
+            token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
         else:
             raise HTTPException(status_code=400, detail="不支援的認證提供者")
+        
+        # 從請求標頭獲取來源
+        origin = request.headers.get("origin", "http://localhost:3000")
+        redirect_uri = f"{origin}/auth/callback/{provider.lower()}"
+        
+        logger.info(f"OAuth callback received for provider: {provider}")
+        logger.debug(f"Using client_id: {client_id}")
+        logger.debug(f"Redirect URI: {redirect_uri}")
+        
+        if not all([client_id, client_secret]):
+            logger.error("Missing OAuth configuration")
+            raise HTTPException(status_code=500, detail="OAuth configuration is incomplete")
+        
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(token_url, data=token_data)
             
-    except HTTPException:
-        raise
+            if response.status_code != 200:
+                logger.error(f"Token request failed: {response.text}")
+                raise HTTPException(status_code=400, detail=f"無法獲取 access token: {response.text}")
+            
+            token_response = response.json()
+            
+            # 獲取用戶信息
+            if provider.upper() == "GOOGLE":
+                user_info = await get_google_user_info(token_response["access_token"])
+            else:
+                user_info = await get_microsoft_user_info(token_response["access_token"])
+            
+            return {
+                "access_token": token_response["access_token"],
+                "token_type": "bearer",
+                "expires_in": token_response.get("expires_in", 3600),
+                "refresh_token": token_response.get("refresh_token"),
+                "user": user_info
+            }
+            
     except Exception as e:
-        logger.error(f"OAuth 回調處理失敗: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"認證處理失敗: {str(e)}")
+        logger.error(f"OAuth callback error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+async def get_google_user_info(access_token: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail="無法獲取用戶信息")
+        user_info = response.json()
+        return {
+            "id": user_info["id"],
+            "email": user_info["email"],
+            "name": user_info.get("name"),
+            "picture": user_info.get("picture")
+        }
+
+async def get_microsoft_user_info(access_token: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail="無法獲取用戶信息")
+        user_info = response.json()
+        return {
+            "id": user_info["id"],
+            "email": user_info["userPrincipalName"],
+            "name": user_info.get("displayName"),
+            "picture": None
+        }
 
 @router.get("/auth/check")
 async def check_auth():
