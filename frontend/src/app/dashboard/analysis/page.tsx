@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft, Download, FileDown, Loader2, LogOut } from "lucide-react"
 import { format } from "date-fns"
 import { zhTW } from "date-fns/locale"
+import { useSession } from "next-auth/react"
+import type { Session } from "next-auth"
 
 interface InvoiceData {
   email_subject: string
@@ -38,6 +40,7 @@ interface AnalysisResult {
 function AnalysisContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { data: session, status } = useSession()
   const [isAnalyzing, setIsAnalyzing] = useState(true)
   const [progress, setProgress] = useState<AnalysisProgress | null>(null)
   const [result, setResult] = useState<AnalysisResult | null>(null)
@@ -49,39 +52,44 @@ function AnalysisContent() {
       return
     }
 
-    const startAnalysis = async () => {
+    const startAnalysis = async (emails: string[]) => {
       try {
-        const access_token = localStorage.getItem("access_token")
-        if (!access_token) {
-          router.push("/auth/login")
-          return
+        if (status !== 'authenticated') {
+          console.error('未登入');
+          router.push("/auth/login");
+          return;
         }
 
-        const response = await fetch("/api/pdf/analyze", {
-          method: "POST",
+        const accessToken = (session?.user as any)?.accessToken
+        if (!accessToken) {
+          console.error('未找到存取令牌');
+          router.push("/auth/login");
+          return;
+        }
+
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/pdf/analyze`, {
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${access_token}`
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
           },
-          body: JSON.stringify(emailIds),
-        })
+          body: JSON.stringify({ emails })
+        });
 
         if (!response.ok) {
-          if (response.status === 401) {
-            router.push("/auth/login")
-            return
-          }
-          throw new Error("解析失敗")
+          const error = await response.json();
+          console.error('API 錯誤:', error);
+          throw new Error('解析失敗');
         }
 
-        const data = await response.json()
-        setResult(data)
-        setIsAnalyzing(false)
+        const result = await response.json();
+        setResult(result);
+        setIsAnalyzing(false);
       } catch (error) {
-        console.error("解析錯誤:", error)
-        setIsAnalyzing(false)
+        console.error('解析錯誤:', error);
+        setIsAnalyzing(false);
       }
-    }
+    };
 
     const pollProgress = async () => {
       try {
@@ -98,9 +106,9 @@ function AnalysisContent() {
       }
     }
 
-    startAnalysis()
+    startAnalysis(emailIds)
     pollProgress()
-  }, [searchParams, router])
+  }, [searchParams, router, session, status])
 
   const handleLogout = () => {
     localStorage.removeItem("access_token")
