@@ -1,48 +1,50 @@
 import NextAuth from "next-auth"
-import GoogleProvider from "next-auth/providers/google"
 import type { NextAuthConfig } from "next-auth"
-import type { JWT } from "next-auth/jwt"
-import type { Session } from "next-auth"
+import AzureADProvider from "next-auth/providers/azure-ad"
 
 export const authOptions: NextAuthConfig = {
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      authorization: {
-        params: {
-          scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email'
-        }
-      }
-    })
+    AzureADProvider({
+      clientId: process.env.AZURE_AD_CLIENT_ID!,
+      clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
+      authorization: { params: { scope: "openid profile email" } }
+    }),
   ],
   callbacks: {
-    async jwt({ token, account, user }): Promise<JWT> {
+    async jwt({ token, account, user }) {
       if (account && user) {
+        if (!user.id) throw new Error("User ID is required")
+        if (!account.access_token) throw new Error("Access token is required")
+        
         token.accessToken = account.access_token
-        token.id = user.id ?? ''
-        token.email = user.email ?? ''
-        token.name = user.name ?? null
-        token.picture = user.image ?? null
+        token.name = user.name || null
+        token.email = user.email || null
+        token.picture = user.image || null
+        token.sub = user.id
       }
       return token
     },
-    async session({ session, token }): Promise<Session> {
-      if (session.user) {
-        session.user.id = token.id
-        session.user.email = token.email
-        session.user.name = token.name
-        session.user.image = token.picture
-        session.user.accessToken = token.accessToken
+    async session({ session, token }) {
+      if (!token.sub || !token.accessToken) {
+        throw new Error("Invalid token")
       }
-      return session
-    }
+      
+      return {
+        ...session,
+        user: {
+          id: token.sub,
+          name: token.name,
+          email: token.email,
+          image: token.picture,
+          accessToken: token.accessToken
+        }
+      }
+    },
   },
   pages: {
-    signIn: '/auth/signin',
-    error: '/auth/error',
+    signIn: "/auth/signin",
+    error: "/auth/error",
   },
-  secret: process.env.NEXTAUTH_SECRET
 }
 
 const handler = NextAuth(authOptions)

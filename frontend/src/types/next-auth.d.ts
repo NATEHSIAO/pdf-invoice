@@ -1,3 +1,5 @@
+import "next-auth"
+import "next-auth/jwt"
 import type { DefaultSession, DefaultUser } from "next-auth"
 import type { DefaultJWT } from "next-auth/jwt"
 
@@ -6,17 +8,12 @@ declare module "next-auth" {
    * 擴展 Session 型別
    * @extends DefaultSession
    */
-  interface Session extends DefaultSession {
-    user: DefaultSession["user"] & {
-      /** 使用者 ID */
+  interface Session {
+    user: {
       id: string
-      /** 使用者 Email */
-      email: string
-      /** 使用者名稱 */
       name: string | null
-      /** 使用者頭像 */
+      email: string | null
       image: string | null
-      /** OAuth Access Token */
       accessToken: string
     }
   }
@@ -25,16 +22,10 @@ declare module "next-auth" {
    * 擴展 User 型別
    * @extends DefaultUser
    */
-  interface User extends DefaultUser {
-    /** OAuth Access Token */
-    accessToken?: string
-    /** 使用者 ID */
+  interface User {
     id: string
-    /** 使用者 Email */
-    email: string
-    /** 使用者名稱 */
     name: string | null
-    /** 使用者頭像 */
+    email: string | null
     image: string | null
   }
 
@@ -58,16 +49,11 @@ declare module "next-auth/jwt" {
    * 擴展 JWT 型別
    * @extends DefaultJWT
    */
-  interface JWT extends DefaultJWT {
-    /** OAuth Access Token */
+  interface JWT {
+    sub: string
     accessToken: string
-    /** 使用者 ID */
-    id: string
-    /** 使用者 Email */
-    email: string
-    /** 使用者名稱 */
     name: string | null
-    /** 使用者頭像 */
+    email: string | null
     picture: string | null
   }
 } 

@@ -8,6 +8,16 @@ import { zhTW } from "date-fns/locale"
 import { useSession } from "next-auth/react"
 import type { Session } from "next-auth"
 
+interface ExtendedSession extends Session {
+  user: {
+    id: string
+    name: string | null
+    email: string | null
+    image: string | null
+    accessToken: string
+  }
+}
+
 interface InvoiceData {
   email_subject: string
   email_sender: string
@@ -54,15 +64,9 @@ function AnalysisContent() {
 
     const startAnalysis = async (emails: string[]) => {
       try {
-        if (status !== 'authenticated') {
-          console.error('未登入');
-          router.push("/auth/login");
-          return;
-        }
-
-        const accessToken = (session?.user as any)?.accessToken
-        if (!accessToken) {
-          console.error('未找到存取令牌');
+        const extendedSession = session as ExtendedSession
+        if (!extendedSession?.user?.id || !extendedSession?.user?.accessToken) {
+          console.error('未登入或未找到存取令牌');
           router.push("/auth/login");
           return;
         }
@@ -71,14 +75,12 @@ function AnalysisContent() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
+            'Authorization': `Bearer ${extendedSession.user.accessToken}`
           },
           body: JSON.stringify({ emails })
         });
 
         if (!response.ok) {
-          const error = await response.json();
-          console.error('API 錯誤:', error);
           throw new Error('解析失敗');
         }
 
@@ -93,7 +95,15 @@ function AnalysisContent() {
 
     const pollProgress = async () => {
       try {
-        const response = await fetch("/api/pdf/progress")
+        const extendedSession = session as ExtendedSession
+        if (!extendedSession?.user?.accessToken) return;
+
+        const response = await fetch("/api/pdf/progress", {
+          headers: {
+            'Authorization': `Bearer ${extendedSession.user.accessToken}`
+          }
+        });
+        
         if (response.ok) {
           const data = await response.json()
           setProgress(data)
@@ -106,12 +116,15 @@ function AnalysisContent() {
       }
     }
 
-    startAnalysis(emailIds)
-    pollProgress()
-  }, [searchParams, router, session, status])
+    startAnalysis(emailIds);
+    pollProgress();
+  }, [searchParams, router, session]);
 
   const handleLogout = () => {
-    localStorage.removeItem("access_token")
+    const extendedSession = session as ExtendedSession
+    if (extendedSession?.user?.accessToken) {
+      localStorage.removeItem("access_token")
+    }
     router.push("/auth/login")
   }
 
