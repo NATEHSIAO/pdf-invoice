@@ -1,10 +1,14 @@
 from fastapi import APIRouter, HTTPException, Response, Depends, Request
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import httpx
 import logging
 import os
 import requests
+from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
+from app.models.user import User, TokenInfo
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -12,12 +16,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 class OAuthCallback(BaseModel):
     code: str
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+# 確保導出所需的函數和類型
+__all__ = ["verify_token", "get_current_user"]
+
+async def verify_token(token: str = Depends(oauth2_scheme)) -> TokenInfo:
+    """驗證令牌並返回令牌信息"""
     if not token:
         raise HTTPException(
             status_code=401,
@@ -35,43 +43,67 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             
             if google_response.status_code == 200:
                 token_info = google_response.json()
-                required_scope = "https://www.googleapis.com/auth/gmail.readonly"
-                if required_scope not in token_info.get("scope", ""):
-                    logger.error(f"缺少必要的 scope: {required_scope}")
-                    raise HTTPException(
-                        status_code=403,
-                        detail="缺少必要的郵件讀取權限"
-                    )
-                return token
+                logger.info(f"Google token info: {token_info}")
+                return TokenInfo(
+                    sub=token_info["sub"],
+                    email=token_info["email"],
+                    name=token_info.get("name"),
+                    picture=token_info.get("picture"),
+                    exp=int(token_info["exp"]),
+                    scope=token_info["scope"],
+                    provider="google"
+                )
             
-            # 如果不是 Google Token，嘗試驗證 Microsoft Token
+            # 嘗試驗證 Microsoft Token
             ms_response = await client.get(
                 "https://graph.microsoft.com/v1.0/me",
                 headers={"Authorization": f"Bearer {token}"}
             )
             
             if ms_response.status_code == 200:
-                return token
+                user_info = ms_response.json()
+                logger.info(f"Microsoft user info: {user_info}")
+                return TokenInfo(
+                    sub=user_info["id"],
+                    email=user_info["userPrincipalName"],
+                    name=user_info.get("displayName"),
+                    picture=None,
+                    exp=int((datetime.now() + timedelta(hours=1)).timestamp()),
+                    scope="openid profile email",
+                    provider="microsoft"
+                )
             
-            # 如果兩種驗證都失敗
-            logger.error("Token 驗證失敗：既不是有效的 Google Token 也不是有效的 Microsoft Token")
             raise HTTPException(
                 status_code=401,
                 detail="無效的認證令牌",
                 headers={"WWW-Authenticate": "Bearer"},
             )
                 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Token 驗證過程發生錯誤: {str(e)}")
         raise HTTPException(
             status_code=401,
-            detail="認證過程發生錯誤",
+            detail=f"認證過程發生錯誤: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
-            
-    return token
+
+async def get_current_user(token_info: TokenInfo = Depends(verify_token)) -> User:
+    """獲取當前用戶信息"""
+    try:
+        return User(
+            id=token_info.sub,
+            email=token_info.email,
+            name=token_info.name,
+            picture=token_info.picture,
+            provider=token_info.provider
+        )
+    except Exception as e:
+        logger.error(f"獲取用戶信息時發生錯誤: {str(e)}")
+        raise HTTPException(
+            status_code=401,
+            detail=f"獲取用戶信息失敗: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 @router.post("/auth/callback/{provider}")
 async def oauth_callback(provider: str, request: Request):
@@ -179,4 +211,32 @@ async def check_auth():
 
 @router.post("/auth/logout")
 async def logout():
-    return Response(status_code=200) 
+    return Response(status_code=200)
+
+@router.get("/auth/session")
+async def get_session(current_user: User = Depends(get_current_user)):
+    """獲取當前會話資訊"""
+    try:
+        return JSONResponse(
+            content={
+                "status": "success",
+                "data": {
+                    "user": {
+                        "id": current_user.id,
+                        "email": current_user.email,
+                        "name": current_user.name,
+                        "picture": current_user.picture,
+                        "provider": current_user.provider
+                    }
+                }
+            }
+        )
+    except Exception as e:
+        logger.error(f"獲取會話資訊時發生錯誤: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": str(e)
+            }
+        ) 

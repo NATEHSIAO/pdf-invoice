@@ -1,51 +1,46 @@
-import NextAuth from "next-auth"
-import type { NextAuthConfig } from "next-auth"
-import AzureADProvider from "next-auth/providers/azure-ad"
+import NextAuth from 'next-auth'
+import GoogleProvider from 'next-auth/providers/google'
+import type { NextAuthOptions } from 'next-auth'
+import type { JWT } from 'next-auth/jwt'
+import type { Session } from 'next-auth'
+import type { Profile } from 'next-auth'
 
-export const authOptions: NextAuthConfig = {
+export const authOptions: NextAuthOptions = {
   providers: [
-    AzureADProvider({
-      clientId: process.env.AZURE_AD_CLIENT_ID!,
-      clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
-      authorization: { params: { scope: "openid profile email" } }
-    }),
-  ],
-  callbacks: {
-    async jwt({ token, account, user }) {
-      if (account && user) {
-        if (!user.id) throw new Error("User ID is required")
-        if (!account.access_token) throw new Error("Access token is required")
-        
-        token.accessToken = account.access_token
-        token.name = user.name || null
-        token.email = user.email || null
-        token.picture = user.image || null
-        token.sub = user.id
-      }
-      return token
-    },
-    async session({ session, token }) {
-      if (!token.sub || !token.accessToken) {
-        throw new Error("Invalid token")
-      }
-      
-      return {
-        ...session,
-        user: {
-          id: token.sub,
-          name: token.name,
-          email: token.email,
-          image: token.picture,
-          accessToken: token.accessToken
+    GoogleProvider({
+      clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      authorization: {
+        params: {
+          prompt: "consent",
+          access_type: "offline",
+          response_type: "code"
         }
       }
-    },
-  },
+    })
+  ],
   pages: {
-    signIn: "/auth/signin",
-    error: "/auth/error",
+    signIn: '/auth/login',
+    error: '/auth/error',
+    signOut: '/auth/signout'
   },
+  session: {
+    strategy: 'jwt' as const
+  },
+  secret: process.env.NEXTAUTH_SECRET,
+  debug: true,
+  callbacks: {
+    async signIn({ account, profile }: { account: any, profile?: Profile }) {
+      if (account?.provider === "google") {
+        return !!(profile?.email)
+      }
+      return true
+    },
+    async session({ session, token }: { session: Session, token: JWT }) {
+      return session
+    }
+  }
 }
 
 const handler = NextAuth(authOptions)
-export { handler as GET, handler as POST } 
+export { handler as GET, handler as POST }

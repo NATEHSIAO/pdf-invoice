@@ -32,3 +32,22 @@
 - 參照「docker-compose.yml」了解各容器功能
 - 檢查 API 與 UI 元件的整合狀況
 - 注意環境變數與 Docker 設定以達一致部署效果
+
+{
+  "rules": [
+    {
+      "pattern": "docker-compose.yml",
+      "actions": ["deny-modify"],
+      "message": "請不要修改 docker-compose.yml，請先檢查錯誤日誌 (docker logs <container_id>)"
+    },
+    {
+      "pattern": "Dockerfile",
+      "actions": ["deny-modify"],
+      "message": "請勿修改 Dockerfile，應先確認是否真的需要變更環境。"
+    },
+    {
+      "pattern": "*.py",
+      "actions": ["allow-modify", "restart-server-on-save"]
+    }
+  ]
+}

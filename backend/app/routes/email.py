@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Header, Depends
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, field_validator
 from datetime import datetime
 from typing import List, Dict, Any, Union
 import logging
@@ -24,8 +24,8 @@ class DateRange(BaseModel):
     start: str
     end: str
 
-    @validator('start', 'end')
-    def validate_date_format(cls, v):
+    @field_validator('start', 'end')
+    def validate_date(cls, v):
         try:
             datetime.strptime(v, '%Y-%m-%d')
             return v

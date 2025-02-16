@@ -1,28 +1,24 @@
-# 建置階段
-FROM node:20-alpine as build
+# 開發環境配置
+FROM node:20-alpine
 
 WORKDIR /app
 
+# 安裝基礎依賴
 COPY package*.json ./
 RUN npm install
+RUN npm install -D tailwindcss@latest postcss@latest autoprefixer@latest
 
 COPY . .
-RUN npm run build
+COPY .env.local .env.local
 
-# 執行階段
-FROM node:20-alpine
-WORKDIR /app
+# 初始化 Tailwind
+RUN npx tailwindcss init -p
 
-COPY --from=build /app/package*.json ./
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/public ./public
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/next.config.js ./
-COPY --from=build /app/.env.local ./
+# 設定環境變數
+ENV NEXT_TELEMETRY_DISABLED=1
 
+# 暴露連接埠
 EXPOSE 3000
 
-ENV NODE_ENV=development
-ENV NEXT_TELEMETRY_DISABLED=1
-CMD ["npm", "run", "dev"]
-
+# 啟動開發伺服器
+CMD ["npm", "run", "dev", "--", "--port", "3000", "--hostname", "0.0.0.0"] 

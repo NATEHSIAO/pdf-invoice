@@ -9,13 +9,13 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: `
               default-src 'self';
-              script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com;
-              style-src 'self' 'unsafe-inline' https://accounts.google.com;
-              img-src 'self' data: https: https://accounts.google.com https://*.googleusercontent.com;
-              font-src 'self' data:;
-              connect-src 'self' http://localhost:8000 http://backend:8000 https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://login.microsoftonline.com https://graph.microsoft.com;
+              script-src 'self' 'unsafe-eval' 'unsafe-inline';
+              style-src 'self' 'unsafe-inline';
+              img-src 'self' data: https:;
+              font-src 'self';
+              connect-src 'self' http://localhost:8000 https://accounts.google.com https://www.googleapis.com https://login.microsoftonline.com;
               frame-src 'self' https://accounts.google.com https://login.microsoftonline.com;
-              form-action 'self' https://accounts.google.com https://login.microsoftonline.com;
+              form-action 'self';
             `.replace(/\s+/g, ' ').trim()
           }
         ]
@@ -25,10 +25,20 @@ const nextConfig = {
   async rewrites() {
     return [
       {
+        source: '/api/auth/:path*',
+        destination: '/api/auth/:path*'
+      },
+      {
         source: '/api/:path*',
         destination: 'http://backend:8000/api/:path*'
       }
     ]
+  },
+  env: {
+    NEXTAUTH_URL: process.env.NEXTAUTH_URL,
+    NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET,
+    NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+    NEXT_PUBLIC_MICROSOFT_CLIENT_ID: process.env.NEXT_PUBLIC_MICROSOFT_CLIENT_ID
   }
 }
 

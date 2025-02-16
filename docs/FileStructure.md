@@ -17,17 +17,31 @@
 │   │   │   ├── layout.tsx              # 根布局，提供全局樣式和字體
 │   │   │   ├── page.tsx                # 首頁（重定向到登入）
 │   │   │   ├── globals.css             # 全局樣式
-│   │   │   └── auth/                   # 認證相關頁面
-│   │   │       ├── layout.tsx          # 認證頁面共用布局
-│   │   │       ├── login/
-│   │   │       │   └── page.tsx        # 登入頁面
-│   │   │       └── callback/
-│   │   │           └── [provider]/
-│   │   │               └── page.tsx     # OAuth 回調頁面
-│   │   ├── lib/         # 工具函式庫
-│   │   │   ├── auth.ts  # 認證相關函式
-│   │   │   └── utils.ts # 通用工具函式
-│   │   └── types/       # TypeScript 型別定義
+│   │   │   ├── providers.tsx           # 全局 Provider 配置
+│   │   │   ├── auth/                   # 認證相關頁面
+│   │   │   │   ├── layout.tsx          # 認證頁面共用布局
+│   │   │   │   ├── signin/
+│   │   │   │   │   └── page.tsx        # 登入頁面
+│   │   │   │   └── error/
+│   │   │   │       └── page.tsx        # 錯誤頁面
+│   │   │   ├── api/                    # API 路由
+│   │   │   │   └── auth/
+│   │   │   │       └── [...nextauth]/
+│   │   │   │           └── route.ts    # NextAuth 配置
+│   │   │   └── dashboard/              # 儀表板頁面
+│   │   │       ├── layout.tsx          # 儀表板布局
+│   │   │       ├── page.tsx            # 搜尋設定頁面
+│   │   │       └── analysis/
+│   │   │           └── page.tsx        # PDF 分析頁面
+│   │   ├── types/                      # TypeScript 型別定義
+│   │   │   ├── next-auth.d.ts         # NextAuth 型別擴充
+│   │   │   └── next-themes.d.ts       # 主題相關型別定義
+│   │   ├── lib/                        # 工具函式庫
+│   │   │   ├── auth.ts                # 認證相關函式
+│   │   │   └── utils.ts               # 通用工具函式
+│   │   └── components/                # React 元件
+│   │       ├── ui/                    # UI 元件
+│   │       └── auth/                  # 認證相關元件
 │   ├── package.json     # 前端依賴配置
 │   ├── next.config.ts   # Next.js 配置
 │   ├── tailwind.config.ts # Tailwind CSS 配置
@@ -52,6 +66,9 @@
 │   ├── utils/          # 工具函式
 │   │   ├── pdf.py      # PDF 處理工具
 │   │   └── email.py    # 郵件處理工具
+│   ├── tests/          # 測試目錄
+│   │   ├── unit/      # 單元測試
+│   │   └── integration/ # 整合測試
 │   ├── requirements.txt # Python 依賴清單
 │   └── .env            # 後端環境變數
 │
@@ -128,3 +145,21 @@
     - `API doc.md`：API 文件
     - `FileStructure.md`：本文件
     - `cursorrules.md`：開發規範
+
+## 重要檔案說明
+
+### 前端 (Next.js/TypeScript)
+- `next-auth.d.ts`: NextAuth 型別定義，包含 Session、User 和 JWT 介面
+- `providers.tsx`: 全局 Provider 配置，包含認證和主題設定
+- `[...nextauth]/route.ts`: NextAuth 路由配置，處理 OAuth 認證流程
+- `analysis/page.tsx`: PDF 分析頁面，處理檔案上傳和分析結果顯示
+
+### 後端 (FastAPI/Python)
+- `auth.py`: 處理 OAuth 認證和 token 驗證
+- `pdf.py`: PDF 檔案解析和資料提取
+- `email.py`: 郵件處理和附件下載
+
+### Docker 配置
+- `docker-compose.yml`: 開發環境容器配置
+- `Dockerfile.frontend`: 前端建置和執行環境
+- `Dockerfile.backend`: 後端建置和執行環境

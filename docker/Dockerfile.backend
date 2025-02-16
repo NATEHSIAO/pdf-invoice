@@ -1,36 +1,37 @@
-# 使用 Python 官方映像作為基礎
-FROM python:3.9-slim
-
-# 安裝系統工具
-RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
+# 使用 Python Alpine 映像作為基礎
+FROM python:3.11-alpine
 
 # 設定工作目錄
 WORKDIR /app
 
-# 複製依賴檔案
+# 安裝系統依賴
+RUN apk add --no-cache \
+    curl \
+    gcc \
+    musl-dev \
+    python3-dev \
+    font-noto
+
+# 複製需求檔案
 COPY requirements.txt .
 
-# 安裝依賴
+# 安裝 Python 套件
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 複製所有後端程式碼
+# 複製應用程式程式碼
 COPY . .
 
 # 設定環境變數
-ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
-ENV PORT=8000
-ENV HOST=0.0.0.0
+ENV PYTHONUNBUFFERED=1
+ENV NEXT_TELEMETRY_DISABLED=1
 
-# 監聽 8000 端口
+# 暴露連接埠
 EXPOSE 8000
 
 # 健康檢查
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/ || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # 啟動應用
-CMD ["sh", "-c", "cd /app && uvicorn app.main:app --host ${HOST} --port ${PORT} --reload"]
+CMD ["sh", "-c", "cd /app && uvicorn app.main:app --host ${HOST} --port ${PORT} --reload"] 

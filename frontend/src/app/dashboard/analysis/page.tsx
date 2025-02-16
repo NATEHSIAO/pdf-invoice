@@ -8,13 +8,15 @@ import { zhTW } from "date-fns/locale"
 import { useSession } from "next-auth/react"
 import type { Session } from "next-auth"
 
-interface ExtendedSession extends Session {
+interface ExtendedSession extends Omit<Session, 'user'> {
   user: {
     id: string
     name: string | null
-    email: string | null
+    email: string
     image: string | null
     accessToken: string
+    provider: string
+    emailVerified: Date | null
   }
 }
 
@@ -62,6 +64,8 @@ function AnalysisContent() {
       return
     }
 
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
+
     const startAnalysis = async (emails: string[]) => {
       try {
         const extendedSession = session as ExtendedSession
@@ -71,7 +75,7 @@ function AnalysisContent() {
           return;
         }
 
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/pdf/analyze`, {
+        const response = await fetch(`${API_BASE}/api/pdf/analyze`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

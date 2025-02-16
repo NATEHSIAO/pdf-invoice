@@ -20,8 +20,11 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
-venv/
+.venv/
 ENV/
+.coverage*
+.pytest_cache/
+htmlcov/
 
 # Node.js 相關
 node_modules/
@@ -68,6 +71,20 @@ next-env.d.ts
 *.log
 /tmp
 /temp
+.coverage*
+pytest.ini
+
+# 測試相關
+/tests/__pycache__/
+/tests/unit/__pycache__/
+/tests/integration/__pycache__/
+.coverage.*
+coverage/
+.pytest_cache/
+
+# Docker 相關
+.docker/
+docker-compose.override.yml
 
 # 專案特定
 /docs/ 

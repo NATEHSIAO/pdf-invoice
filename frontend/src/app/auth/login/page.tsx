@@ -1,20 +1,20 @@
 "use client"
 
 import Image from "next/image"
-import { getOAuthUrl } from "@/lib/auth"
+import { signIn } from "next-auth/react"
 
 export default function LoginPage() {
   const handleGoogleLogin = () => {
-    window.location.href = getOAuthUrl("GOOGLE")
+    signIn("google", { callbackUrl: "/dashboard" })
   }
 
   const handleMicrosoftLogin = () => {
-    window.location.href = getOAuthUrl("MICROSOFT")
+    signIn("microsoft", { callbackUrl: "/dashboard" })
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-900 p-4">
-      <div className="w-full max-w-md space-y-8 rounded-2xl bg-white p-8 shadow-lg dark:bg-zinc-800">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="w-full max-w-md space-y-8 rounded-lg bg-card p-8 shadow-lg">
         <div className="flex flex-col items-center space-y-2 text-center">
           <div className="flex items-center space-x-2">
             <Image
@@ -24,7 +24,7 @@ export default function LoginPage() {
               height={40}
               className="dark:invert"
             />
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="text-2xl font-bold tracking-tight text-card-foreground">
               PDF Invoice Manager
             </h1>
           </div>
@@ -35,7 +35,7 @@ export default function LoginPage() {
         <div className="grid gap-4">
           <button
             onClick={handleGoogleLogin}
-            className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+            className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 bg-background text-foreground"
           >
             <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
               <path
@@ -59,7 +59,7 @@ export default function LoginPage() {
           </button>
           <button
             onClick={handleMicrosoftLogin}
-            className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
+            className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 bg-background text-foreground"
           >
             <svg className="mr-2 h-4 w-4" viewBox="0 0 23 23">
               <path fill="#f25022" d="M1 1h10v10H1z"/>
