@@ -8,17 +8,19 @@ COPY package*.json ./
 RUN npm install
 RUN npm install -D tailwindcss@latest postcss@latest autoprefixer@latest
 
+# 複製專案檔案和環境變數
 COPY . .
-COPY .env.local .env.local
-
-# 初始化 Tailwind
-RUN npx tailwindcss init -p
+COPY .env.local .env
 
 # 設定環境變數
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=development
+
+# 初始化 Tailwind
+RUN npx tailwindcss init -p
 
 # 暴露連接埠
 EXPOSE 3000
 
 # 啟動開發伺服器
-CMD ["npm", "run", "dev", "--", "--port", "3000", "--hostname", "0.0.0.0"] 
+CMD ["sh", "-c", "npm run dev -- --port 3000 --hostname 0.0.0.0"] 

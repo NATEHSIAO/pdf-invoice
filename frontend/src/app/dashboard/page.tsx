@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { PaperclipIcon, X, LogOut } from "lucide-react"
 import { format } from "date-fns"
 import { zhTW } from "date-fns/locale"
+import { useSession, signOut } from "next-auth/react"
 
 interface EmailSender {
   name: string
@@ -46,6 +47,7 @@ interface APIEmail {
 
 export default function DashboardPage() {
   const router = useRouter()
+  const { data: session, status } = useSession()
   const [searchKeywords, setSearchKeywords] = useState<string>("發票")
   const [dateRange, setDateRange] = useState({
     start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
@@ -57,11 +59,24 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null)
 
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/auth/login")
+    }
+  }, [status, router])
+
   const handleSearch = async () => {
     setIsLoading(true)
     try {
-      const searchParams = {
-        provider: localStorage.getItem("auth_provider")?.toUpperCase() || "GOOGLE",
+      const accessToken = session?.user?.accessToken
+      if (!accessToken) {
+        console.error("找不到存取令牌")
+        router.push("/auth/login")
+        return
+      }
+
+      const searchParamsPayload = {
+        provider: session?.user?.provider?.toUpperCase() || "GOOGLE",
         keywords: searchKeywords,
         dateRange: {
           start: dateRange.start,
@@ -70,102 +85,52 @@ export default function DashboardPage() {
         folder,
       }
       
-      console.log("搜尋參數:", JSON.stringify(searchParams, null, 2))
-
-      const access_token = localStorage.getItem("access_token")
-      if (!access_token) {
-        console.error("找不到 access token")
-        router.push("/auth/login")
-        return
-      }
-
-      console.log("準備發送請求到:", `${process.env.NEXT_PUBLIC_API_URL}/api/emails/search`)
-      console.log("完整請求配置:", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${access_token.substring(0, 10)}...`
-        },
-        body: JSON.stringify(searchParams)
-      })
+      console.log("搜尋參數:", JSON.stringify(searchParamsPayload, null, 2))
 
       const response = await fetch("/api/emails/search", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${access_token}`
+          "Authorization": `Bearer ${accessToken}`
         },
-        body: JSON.stringify(searchParams)
+        body: JSON.stringify(searchParamsPayload)
       })
 
       console.log("搜尋響應狀態:", response.status)
-      console.log("搜尋響應標頭:", Object.fromEntries(response.headers.entries()))
-
+      
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error("搜尋失敗:", {
-          status: response.status,
-          statusText: response.statusText,
-          errorText
-        })
-        
         if (response.status === 401) {
-          console.log("認證失敗，重新導向到登入頁面")
-          localStorage.removeItem("access_token")
-          router.push("/auth/login")
+          console.log("認證失敗，導向登入頁")
+          signOut({ callbackUrl: "/auth/login" })
           return
         }
-        
-        let errorMessage = "搜尋失敗"
-        try {
-          const errorData = JSON.parse(errorText)
-          errorMessage = errorData.detail || errorMessage
-        } catch (e) {
-          console.error("解析錯誤回應失敗:", e)
-        }
-        
-        throw new Error(errorMessage)
+        throw new Error("搜尋時發生錯誤")
       }
 
       const data = await response.json()
-      console.log("搜尋結果數量:", data.length)
-      console.log("原始郵件數據:", data)
-
-      const formattedEmails = (data as APIEmail[]).map((email: APIEmail) => {
-        console.log("原始郵件資料:", email)
-        
-        const formattedEmail = {
-          id: email.id,
-          subject: email.subject || "（無主旨）",
-          sender: {
-            name: email.sender?.name || "未知寄件者",
-            email: email.sender?.email || ""
-          },
-          date: email.date,
-          content: email.content || "",
-          hasAttachments: email.has_attachments || false,
-          attachments: email.attachments?.map(att => ({
-            filename: att.filename,
-            mime_type: att.mimeType,
-            size: att.size
-          })) || []
-        }
-        
-        console.log("格式化後的單封郵件:", formattedEmail)
-        return formattedEmail
-      })
       
-      console.log("格式化後的郵件:", formattedEmails)
+      const formattedEmails = (data as APIEmail[]).map((email: APIEmail) => ({
+        id: email.id,
+        subject: email.subject || "（無主旨）",
+        sender: {
+          name: email.sender?.name || "未知寄件者",
+          email: email.sender?.email || ""
+        },
+        date: email.date,
+        content: email.content || "",
+        hasAttachments: email.has_attachments || false,
+        attachments: email.attachments?.map(att => ({
+          filename: att.filename,
+          mime_type: att.mimeType,
+          size: att.size
+        })) || []
+      }))
+
       setEmails(formattedEmails)
       setSelectedEmails(new Set(formattedEmails.map(email => email.id)))
     } catch (error) {
       console.error("搜尋錯誤:", error)
-      const errorMessage = error instanceof Error ? error.message : "搜尋時發生錯誤"
-      alert(errorMessage)
-      
-      if (errorMessage === "請先登入") {
-        router.push("/auth/login")
-      }
+      alert(error instanceof Error ? error.message : "搜尋時發生錯誤")
     } finally {
       setIsLoading(false)
     }
@@ -194,6 +159,10 @@ export default function DashboardPage() {
     router.push(`/dashboard/analysis?emails=${Array.from(selectedEmails).join(",")}`)
   }
 
+  const handleLogout = () => {
+    signOut({ callbackUrl: "/auth/login" })
+  }
+
   const formatFileSize = (bytes: number): string => {
     const units = ['B', 'KB', 'MB', 'GB']
     let size = bytes
@@ -205,11 +174,6 @@ export default function DashboardPage() {
     }
     
     return `${size.toFixed(1)} ${units[unitIndex]}`
-  }
-
-  const handleLogout = () => {
-    localStorage.removeItem("access_token")
-    router.push("/auth/login")
   }
 
   return (

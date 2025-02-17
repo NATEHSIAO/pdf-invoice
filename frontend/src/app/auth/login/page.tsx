@@ -9,7 +9,7 @@ export default function LoginPage() {
   }
 
   const handleMicrosoftLogin = () => {
-    signIn("microsoft", { callbackUrl: "/dashboard" })
+    signIn("azure-ad", { callbackUrl: "/dashboard" })
   }
 
   return (

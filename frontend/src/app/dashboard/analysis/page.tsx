@@ -5,20 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft, Download, FileDown, Loader2, LogOut } from "lucide-react"
 import { format } from "date-fns"
 import { zhTW } from "date-fns/locale"
-import { useSession } from "next-auth/react"
+import { useSession, signOut } from "next-auth/react"
 import type { Session } from "next-auth"
-
-interface ExtendedSession extends Omit<Session, 'user'> {
-  user: {
-    id: string
-    name: string | null
-    email: string
-    image: string | null
-    accessToken: string
-    provider: string
-    emailVerified: Date | null
-  }
-}
 
 interface InvoiceData {
   email_subject: string
@@ -68,8 +56,7 @@ function AnalysisContent() {
 
     const startAnalysis = async (emails: string[]) => {
       try {
-        const extendedSession = session as ExtendedSession
-        if (!extendedSession?.user?.id || !extendedSession?.user?.accessToken) {
+        if (!session?.user?.accessToken) {
           console.error('未登入或未找到存取令牌');
           router.push("/auth/login");
           return;
@@ -79,7 +66,7 @@ function AnalysisContent() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${extendedSession.user.accessToken}`
+            'Authorization': `Bearer ${session.user.accessToken}`
           },
           body: JSON.stringify({ emails })
         });
@@ -99,12 +86,11 @@ function AnalysisContent() {
 
     const pollProgress = async () => {
       try {
-        const extendedSession = session as ExtendedSession
-        if (!extendedSession?.user?.accessToken) return;
+        if (!session?.user?.accessToken) return;
 
         const response = await fetch("/api/pdf/progress", {
           headers: {
-            'Authorization': `Bearer ${extendedSession.user.accessToken}`
+            'Authorization': `Bearer ${session.user.accessToken}`
           }
         });
         
@@ -125,11 +111,7 @@ function AnalysisContent() {
   }, [searchParams, router, session]);
 
   const handleLogout = () => {
-    const extendedSession = session as ExtendedSession
-    if (extendedSession?.user?.accessToken) {
-      localStorage.removeItem("access_token")
-    }
-    router.push("/auth/login")
+    signOut({ callbackUrl: "/auth/login" })
   }
 
   const handleDownloadCSV = () => {

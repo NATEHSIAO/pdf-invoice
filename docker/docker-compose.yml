@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   backend:
     build:
@@ -22,9 +24,17 @@ services:
       timeout: 30s
       retries: 3
       start_period: 5s
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - app-network
-    restart: always
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     build:
@@ -35,14 +45,49 @@ services:
     volumes:
       - ../frontend:/app
       - /app/node_modules
-    env_file:
-      - ../frontend/.env.local
+      - ../frontend/.env.local:/app/.env
     environment:
+      - NODE_ENV=development
       - NEXT_PUBLIC_APP_URL=http://localhost:3000
       - NEXTAUTH_URL=http://localhost:3000
       - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NEXT_TELEMETRY_DISABLED=1
+    depends_on:
+      - backend
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    tty: true
+    stdin_open: true
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
 
 networks:
   app-network:
