@@ -14,10 +14,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/emails",
-    tags=["email"]
-)
+router = APIRouter(tags=["email"])
 
 # 基本模型定義
 class DateRange(BaseModel):

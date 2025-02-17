@@ -65,6 +65,17 @@ export default function DashboardPage() {
     }
   }, [status, router])
 
+  const getProviderForAPI = (provider?: string) => {
+    if (!provider) return "GOOGLE";
+    
+    // 將 AZURE-AD 對應到 MICROSOFT
+    if (provider.toUpperCase() === "AZURE-AD") {
+      return "MICROSOFT";
+    }
+    
+    return provider.toUpperCase();
+  };
+
   const handleSearch = async () => {
     setIsLoading(true)
     try {
@@ -76,7 +87,7 @@ export default function DashboardPage() {
       }
 
       const searchParamsPayload = {
-        provider: session?.user?.provider?.toUpperCase() || "GOOGLE",
+        provider: getProviderForAPI(session?.user?.provider),
         keywords: searchKeywords,
         dateRange: {
           start: dateRange.start,

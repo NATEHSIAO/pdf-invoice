@@ -25,7 +25,7 @@ app.add_middleware(
 
 # 包含路由，統一加上 API 前綴
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(email.router, prefix="/api/emails", tags=["emails"])
+app.include_router(email.router, prefix="/api/emails", tags=["email"])
 app.include_router(pdf.router, prefix="/api/pdf", tags=["pdf"])
 
 @app.get("/")
