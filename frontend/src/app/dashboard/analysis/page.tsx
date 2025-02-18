@@ -82,31 +82,39 @@ function AnalysisContent() {
       }
     }
 
-    const pollProgress = async () => {
-      try {
-        if (!session?.user?.accessToken) return
+    startAnalysis(emailIds)
+  }, [searchParams, router, session])
 
-        const response = await fetch("/api/pdf/progress", {
-          headers: {
-            'Authorization': `Bearer ${session.user.accessToken}`
-          }
-        })
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
 
-        if (response.ok) {
-          const data = await response.json()
-          setProgress(data)
-          if (data.status === "processing") {
-            setTimeout(pollProgress, 1000)
+    if (isAnalyzing) {
+      // 開始輪詢進度
+      intervalId = setInterval(async () => {
+        try {
+          const response = await fetch("/api/pdf/progress");
+          const data = await response.json();
+          setProgress(data);
+          
+          // 如果狀態是 completed 或 error，停止輪詢
+          if (data.status === "completed" || data.status === "error") {
+            setIsAnalyzing(false);
+            clearInterval(intervalId);
           }
+        } catch (error) {
+          console.error("獲取進度時發生錯誤:", error);
+          setIsAnalyzing(false);
+          clearInterval(intervalId);
         }
-      } catch (error) {
-        console.error("獲取進度失敗:", error)
-      }
+      }, 1000);
     }
 
-    startAnalysis(emailIds)
-    pollProgress()
-  }, [searchParams, router, session])
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isAnalyzing]);
 
   const handleLogout = () => {
     signOut({ callbackUrl: "/auth/login" })
@@ -203,12 +211,12 @@ function AnalysisContent() {
         </div>
       </div>
 
-      {isAnalyzing ? (
-        <div className="rounded-lg border p-8">
+      <div className="rounded-lg border p-8">
+        {isAnalyzing ? (
           <div className="flex flex-col items-center justify-center space-y-4">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
             <div className="text-center">
-              <p className="font-medium">正在解析 PDF 文件</p>
+              <p className="font-medium">資料解析中</p>
               {progress && (
                 <div className="mt-2">
                   <div className="h-2 w-64 rounded-full bg-muted">
@@ -226,69 +234,69 @@ function AnalysisContent() {
               )}
             </div>
           </div>
-        </div>
-      ) : result?.invoices ? (
-        <div className="rounded-lg border">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="p-3 text-left text-sm font-medium">Email主旨</th>
-                  <th className="p-3 text-left text-sm font-medium">寄件人</th>
-                  <th className="p-3 text-left text-sm font-medium">Email日期</th>
-                  <th className="p-3 text-left text-sm font-medium">發票號碼</th>
-                  <th className="p-3 text-left text-sm font-medium">發票日期</th>
-                  <th className="p-3 text-left text-sm font-medium">買受人</th>
-                  <th className="p-3 text-left text-sm font-medium">統一編號</th>
-                  <th className="p-3 text-left text-sm font-medium">開立單位</th>
-                  <th className="p-3 text-right text-sm font-medium">應稅銷售額</th>
-                  <th className="p-3 text-right text-sm font-medium">免稅銷售額</th>
-                  <th className="p-3 text-right text-sm font-medium">零稅率銷售額</th>
-                  <th className="p-3 text-right text-sm font-medium">營業稅稅額</th>
-                  <th className="p-3 text-right text-sm font-medium">發票總金額</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {result.invoices.map((invoice, index) => (
-                  <tr key={index} className="hover:bg-muted/50">
-                    <td className="p-3 text-sm">{invoice.email_subject}</td>
-                    <td className="p-3 text-sm">{invoice.email_sender}</td>
-                    <td className="p-3 text-sm">
-                      {format(new Date(invoice.email_date), "yyyy/MM/dd HH:mm", {
-                        locale: zhTW,
-                      })}
-                    </td>
-                    <td className="p-3 text-sm">{invoice.invoice_number}</td>
-                    <td className="p-3 text-sm">{invoice.invoice_date}</td>
-                    <td className="p-3 text-sm">{invoice.buyer_name}</td>
-                    <td className="p-3 text-sm">{invoice.buyer_tax_id}</td>
-                    <td className="p-3 text-sm">{invoice.seller_name}</td>
-                    <td className="p-3 text-sm text-right">
-                      {invoice.taxable_amount.toLocaleString()}
-                    </td>
-                    <td className="p-3 text-sm text-right">
-                      {invoice.tax_free_amount.toLocaleString()}
-                    </td>
-                    <td className="p-3 text-sm text-right">
-                      {invoice.zero_tax_amount.toLocaleString()}
-                    </td>
-                    <td className="p-3 text-sm text-right">
-                      {invoice.tax_amount.toLocaleString()}
-                    </td>
-                    <td className="p-3 text-sm text-right">
-                      {invoice.total_amount.toLocaleString()}
-                    </td>
+        ) : result?.invoices && result.invoices.length > 0 ? (
+          <div className="rounded-lg border">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="p-3 text-left text-sm font-medium">Email主旨</th>
+                    <th className="p-3 text-left text-sm font-medium">寄件人</th>
+                    <th className="p-3 text-left text-sm font-medium">Email日期</th>
+                    <th className="p-3 text-left text-sm font-medium">發票號碼</th>
+                    <th className="p-3 text-left text-sm font-medium">發票日期</th>
+                    <th className="p-3 text-left text-sm font-medium">買受人</th>
+                    <th className="p-3 text-left text-sm font-medium">統一編號</th>
+                    <th className="p-3 text-left text-sm font-medium">開立單位</th>
+                    <th className="p-3 text-right text-sm font-medium">應稅銷售額</th>
+                    <th className="p-3 text-right text-sm font-medium">免稅銷售額</th>
+                    <th className="p-3 text-right text-sm font-medium">零稅率銷售額</th>
+                    <th className="p-3 text-right text-sm font-medium">營業稅稅額</th>
+                    <th className="p-3 text-right text-sm font-medium">發票總金額</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y">
+                  {result?.invoices?.map((invoice, index) => (
+                    <tr key={index} className="hover:bg-muted/50">
+                      <td className="p-3 text-sm">{invoice.email_subject}</td>
+                      <td className="p-3 text-sm">{invoice.email_sender}</td>
+                      <td className="p-3 text-sm">
+                        {format(new Date(invoice.email_date), "yyyy/MM/dd HH:mm", {
+                          locale: zhTW,
+                        })}
+                      </td>
+                      <td className="p-3 text-sm">{invoice.invoice_number}</td>
+                      <td className="p-3 text-sm">{invoice.invoice_date}</td>
+                      <td className="p-3 text-sm">{invoice.buyer_name}</td>
+                      <td className="p-3 text-sm">{invoice.buyer_tax_id}</td>
+                      <td className="p-3 text-sm">{invoice.seller_name}</td>
+                      <td className="p-3 text-sm text-right">
+                        {invoice.taxable_amount.toLocaleString()}
+                      </td>
+                      <td className="p-3 text-sm text-right">
+                        {invoice.tax_free_amount.toLocaleString()}
+                      </td>
+                      <td className="p-3 text-sm text-right">
+                        {invoice.zero_tax_amount.toLocaleString()}
+                      </td>
+                      <td className="p-3 text-sm text-right">
+                        {invoice.tax_amount.toLocaleString()}
+                      </td>
+                      <td className="p-3 text-sm text-right">
+                        {invoice.total_amount.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="rounded-lg border p-8 text-center text-muted-foreground">
-          無法解析 PDF 文件
-        </div>
-      )}
+        ) : (
+          <div className="rounded-lg border p-8 text-center text-muted-foreground">
+            無法解析 PDF 文件
+          </div>
+        )}
+      </div>
 
       {result?.failed_files && result.failed_files.length > 0 && (
         <div className="rounded-lg border p-4">

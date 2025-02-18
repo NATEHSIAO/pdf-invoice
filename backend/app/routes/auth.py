@@ -106,16 +106,20 @@ async def get_current_user(authorization: str = Header(...)) -> User:
         raise HTTPException(status_code=401, detail="存取令牌驗證失敗")
 
     token_info = response.json()
+    logger.info(f"Google token info: {token_info}")
+    
     user_data = {
         "id": token_info.get("sub"),
-        "provider": "google",  # 或依實際邏輯決定 provider
-        "access_token": token  # 將由前端傳來的 token 直接保留到 User 模型
+        "email": token_info.get("email"),
+        "provider": "google",
+        "access_token": token
     }
+    
     try:
-        user = User(**user_data)
+        return User(**user_data)
     except Exception as e:
+        logger.error(f"建立用戶物件失敗: {str(e)}")
         raise HTTPException(status_code=401, detail="無效的使用者資訊")
-    return user
 
 @router.post("/auth/callback/{provider}")
 async def oauth_callback(provider: str, request: Request):
