@@ -59,6 +59,10 @@ class AnalysisResult(BaseModel):
 # 全局變數用於追蹤進度
 current_progress = AnalysisProgress(total=0, current=0, status="idle", message="")
 
+# 新增一個請求模型，以符合前端傳入的 JSON 格式
+class AnalyzeRequest(BaseModel):
+    emails: List[str]
+
 async def download_pdf_attachment(client: httpx.AsyncClient, email_service: EmailService, message_id: str, attachment: Dict[str, Any], temp_dir: str) -> Optional[str]:
     """下載 PDF 附件"""
     try:
@@ -223,88 +227,80 @@ def handle_pdf_errors(func):
 
 @router.post("/analyze")
 async def analyze_pdfs(
-    emails: List[str],
+    payload: AnalyzeRequest,
     current_user: User = Depends(get_current_user)
 ) -> AnalysisResult:
+    # 從請求模型中提取出 emails 列表
+    emails = payload.emails
+
+    # 移除多餘的型別檢查，直接使用 get_current_user 注入的 User 物件
+    
+    global current_progress
+    current_progress = AnalysisProgress(
+        total=len(emails),
+        current=0,
+        status="processing",
+        message="開始處理"
+    )
+    
+    result = AnalysisResult(
+        invoices=[],
+        failed_files=[],
+        download_url=None
+    )
+    
     try:
-        if not isinstance(current_user, User):
-            raise HTTPException(
-                status_code=401,
-                detail="無效的使用者資訊"
-            )
+        email_service = EmailService(current_user.access_token, current_user.provider)
         
-        global current_progress
-        current_progress = AnalysisProgress(
-            total=len(emails),
-            current=0,
-            status="processing",
-            message="開始處理"
-        )
-        
-        result = AnalysisResult(
-            invoices=[],
-            failed_files=[],
-            download_url=None
-        )
-        
-        try:
-            email_service = EmailService(current_user.access_token, current_user.provider)
-            
-            for email_id in emails:
+        for email_id in emails:
+            try:
                 try:
-                    try:
-                        email_details = await email_service.get_email_details(email_id)
-                    except HTTPException as he:
-                        raise he
-                    except Exception as e:
-                        logger.error(f"獲取郵件 {email_id} 詳細資訊失敗: {str(e)}")
-                        result.failed_files.append(f"郵件 {email_id} 無法取得詳細資訊")
-                        current_progress.current += 1
-                        continue
-                        
-                    if not email_details or "attachments" not in email_details:
-                        result.failed_files.append(f"郵件 {email_id} 無法取得詳細資訊")
-                        current_progress.current += 1
-                        continue
-                        
-                    # 處理附件
-                    for attachment in email_details["attachments"]:
-                        if attachment["mimeType"] == "application/pdf":
-                            pdf_path = await download_pdf_attachment(
-                                email_service.client,
-                                email_service,
-                                email_id,
-                                attachment,
-                                TEMP_DIR
-                            )
-                            
-                            if pdf_path:
-                                invoice_data = extract_invoice_data(pdf_path, email_details)
-                                if invoice_data:
-                                    result.invoices.append(invoice_data)
-                                else:
-                                    result.failed_files.append(attachment["filename"])
+                    email_details = await email_service.get_email_details(email_id)
                 except HTTPException as he:
                     raise he
                 except Exception as e:
-                    logger.error(f"處理郵件 {email_id} 時發生錯誤: {str(e)}")
-                    result.failed_files.append(f"郵件 {email_id}: {str(e)}")
+                    logger.error(f"獲取郵件 {email_id} 詳細資訊失敗: {str(e)}")
+                    result.failed_files.append(f"郵件 {email_id} 無法取得詳細資訊")
+                    current_progress.current += 1
+                    continue
                 
-                current_progress.current += 1
+                if not email_details or "attachments" not in email_details:
+                    result.failed_files.append(f"郵件 {email_id} 無法取得詳細資訊")
+                    current_progress.current += 1
+                    continue
                 
-            return result
+                # 處理附件
+                for attachment in email_details["attachments"]:
+                    if attachment["mimeType"] == "application/pdf":
+                        pdf_path = await download_pdf_attachment(
+                            email_service.client,
+                            email_service,
+                            email_id,
+                            attachment,
+                            TEMP_DIR
+                        )
+                        
+                        if pdf_path:
+                            invoice_data = extract_invoice_data(pdf_path, email_details)
+                            if invoice_data:
+                                result.invoices.append(invoice_data)
+                            else:
+                                result.failed_files.append(attachment["filename"])
+            except HTTPException as he:
+                raise he
+            except Exception as e:
+                logger.error(f"處理郵件 {email_id} 時發生錯誤: {str(e)}")
+                result.failed_files.append(f"郵件 {email_id}: {str(e)}")
             
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            logger.error(f"郵件服務錯誤: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"郵件服務錯誤: {str(e)}")
-            
+            current_progress.current += 1
+        
+        return result
+        
     except HTTPException as he:
         raise he
     except Exception as e:
-        logger.error(f"PDF 分析失敗: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"PDF 分析失敗: {str(e)}")
+        logger.error(f"郵件服務錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"郵件服務錯誤: {str(e)}")
 
 @router.get("/progress")
 async def get_analysis_progress() -> AnalysisProgress:
