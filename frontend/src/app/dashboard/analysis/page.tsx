@@ -42,7 +42,7 @@ interface AnalysisResult {
 // IndexedDB 相關常數
 const DB_NAME = 'PDFInvoiceDB';
 const STORE_NAME = 'pdfs';
-const DB_VERSION = 1;
+const DB_VERSION = 2;  // 增加版本號以觸發資料庫升級
 
 interface PDFRecord {
   filename: string;
@@ -51,7 +51,7 @@ interface PDFRecord {
   createdAt: number;
 }
 
-// 修改 initDB 的回傳型別
+// 修改 initDB 的實作
 const initDB = async (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -61,45 +61,71 @@ const initDB = async (): Promise<IDBDatabase> => {
 
     request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: ['sessionId', 'filename'] });
-        store.createIndex('sessionId', 'sessionId', { unique: false });
-        store.createIndex('createdAt', 'createdAt', { unique: false });
+      
+      // 如果存儲區已存在，則刪除它
+      if (db.objectStoreNames.contains(STORE_NAME)) {
+        db.deleteObjectStore(STORE_NAME);
       }
+      
+      // 創建新的存儲區
+      const store = db.createObjectStore(STORE_NAME, { 
+        keyPath: ['sessionId', 'filename']
+      });
+      
+      // 創建索引
+      store.createIndex('sessionId', 'sessionId', { unique: false });
+      store.createIndex('createdAt', 'createdAt', { unique: false });
+      
+      console.log('資料庫升級完成，已創建所需索引');
     };
   });
 };
 
 // 修改 clearSessionPDFs 函數
-const clearSessionPDFs = async (sessionId: string) => {
+const clearSessionPDFs = async (sessionId: string): Promise<void> => {
+  console.log('開始清理 session PDFs:', sessionId);
   const db = await initDB();
   return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const index = store.index('sessionId');
-    const request = index.openCursor(IDBKeyRange.only(sessionId));
+    try {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const sessionIndex = store.index('sessionId');
+      const request = sessionIndex.openCursor(IDBKeyRange.only(sessionId));
 
-    request.onerror = () => reject(request.error);
-    
-    const deletePromises: Promise<void>[] = [];
-    
-    request.onsuccess = (event: Event) => {
-      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
-      if (cursor) {
-        deletePromises.push(
-          new Promise<void>((res, rej) => {
-            const deleteRequest = cursor.delete();
-            deleteRequest.onerror = () => rej(deleteRequest.error);
-            deleteRequest.onsuccess = () => res();
-          })
-        );
-        cursor.continue();
-      } else {
-        Promise.all(deletePromises)
-          .then(() => resolve())
-          .catch(reject);
-      }
-    };
+      const deletePromises: Promise<void>[] = [];
+
+      request.onerror = () => {
+        console.error('清理 PDFs 時發生錯誤:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = (event: Event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          deletePromises.push(
+            new Promise<void>((res, rej) => {
+              const deleteRequest = cursor.delete();
+              deleteRequest.onerror = () => rej(deleteRequest.error);
+              deleteRequest.onsuccess = () => res();
+            })
+          );
+          cursor.continue();
+        } else {
+          Promise.all(deletePromises)
+            .then(() => {
+              console.log('成功清理 session PDFs');
+              resolve();
+            })
+            .catch(error => {
+              console.error('清理 PDFs 時發生錯誤:', error);
+              reject(error);
+            });
+        }
+      };
+    } catch (error) {
+      console.error('執行清理操作時發生錯誤:', error);
+      reject(error);
+    }
   });
 };
 
@@ -123,51 +149,79 @@ const savePDFToIndexedDB = async (sessionId: string, filename: string, content: 
 };
 
 // 修改 getSessionPDFs 函數
-const getSessionPDFs = async (sessionId: string) => {
+const getSessionPDFs = async (sessionId: string): Promise<PDFRecord[]> => {
+  console.log('開始獲取 session PDFs:', sessionId);
   const db = await initDB();
   return new Promise<PDFRecord[]>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const index = store.index('sessionId');
-    const request = index.getAll(IDBKeyRange.only(sessionId));
+    try {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const sessionIndex = store.index('sessionId');
+      const request = sessionIndex.getAll(IDBKeyRange.only(sessionId));
 
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+      request.onerror = () => {
+        console.error('獲取 PDFs 時發生錯誤:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        console.log('成功獲取 PDFs，數量:', request.result.length);
+        resolve(request.result);
+      };
+    } catch (error) {
+      console.error('執行獲取操作時發生錯誤:', error);
+      reject(error);
+    }
   });
 };
 
 // 修改 cleanupOldPDFs 函數
-const cleanupOldPDFs = async (maxAgeHours = 24) => {
+const cleanupOldPDFs = async (maxAgeHours = 24): Promise<void> => {
+  console.log('開始清理過期 PDFs');
   const db = await initDB();
   const cutoffTime = Date.now() - (maxAgeHours * 60 * 60 * 1000);
   
   return new Promise<void>((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const index = store.index('createdAt');
-    const request = index.openCursor(IDBKeyRange.upperBound(cutoffTime));
+    try {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const createdAtIndex = store.index('createdAt');
+      const request = createdAtIndex.openCursor(IDBKeyRange.upperBound(cutoffTime));
 
-    request.onerror = () => reject(request.error);
-    
-    const deletePromises: Promise<void>[] = [];
-    
-    request.onsuccess = (event: Event) => {
-      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
-      if (cursor) {
-        deletePromises.push(
-          new Promise<void>((res, rej) => {
-            const deleteRequest = cursor.delete();
-            deleteRequest.onerror = () => rej(deleteRequest.error);
-            deleteRequest.onsuccess = () => res();
-          })
-        );
-        cursor.continue();
-      } else {
-        Promise.all(deletePromises)
-          .then(() => resolve())
-          .catch(reject);
-      }
-    };
+      const deletePromises: Promise<void>[] = [];
+
+      request.onerror = () => {
+        console.error('清理過期 PDFs 時發生錯誤:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = (event: Event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          deletePromises.push(
+            new Promise<void>((res, rej) => {
+              const deleteRequest = cursor.delete();
+              deleteRequest.onerror = () => rej(deleteRequest.error);
+              deleteRequest.onsuccess = () => res();
+            })
+          );
+          cursor.continue();
+        } else {
+          Promise.all(deletePromises)
+            .then(() => {
+              console.log('成功清理過期 PDFs');
+              resolve();
+            })
+            .catch(error => {
+              console.error('清理過期 PDFs 時發生錯誤:', error);
+              reject(error);
+            });
+        }
+      };
+    } catch (error) {
+      console.error('執行清理過期操作時發生錯誤:', error);
+      reject(error);
+    }
   });
 };
 
