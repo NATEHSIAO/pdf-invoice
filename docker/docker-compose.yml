@@ -3,8 +3,8 @@ version: '3.8'
 services:
   backend:
     build:
-      context: ../backend
-      dockerfile: ../docker/Dockerfile.backend
+      context: ..
+      dockerfile: docker/Dockerfile.backend
     ports:
       - "8000:8000"
     volumes:
@@ -38,19 +38,16 @@ services:
 
   frontend:
     build:
-      context: ../frontend
-      dockerfile: ../docker/Dockerfile.frontend
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
     ports:
       - "3000:3000"
     volumes:
       - ../frontend:/app
       - /app/node_modules
-      - ../frontend/.env.local:/app/.env
     environment:
       - NODE_ENV=development
-      - NEXT_PUBLIC_APP_URL=http://localhost:3000
-      - NEXTAUTH_URL=http://localhost:3000
-      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - WATCHPACK_POLLING=true
       - NEXT_TELEMETRY_DISABLED=1
     depends_on:
       - backend

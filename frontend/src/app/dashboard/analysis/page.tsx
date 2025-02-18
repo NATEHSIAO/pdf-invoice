@@ -7,6 +7,8 @@ import { format } from "date-fns"
 import { zhTW } from "date-fns/locale"
 import { useSession, signOut } from "next-auth/react"
 import type { Session } from "next-auth"
+import JSZip from "jszip"
+import { message } from "antd"
 
 interface InvoiceData {
   email_subject: string
@@ -37,6 +39,138 @@ interface AnalysisResult {
   download_url: string | null
 }
 
+// IndexedDB 相關常數
+const DB_NAME = 'PDFInvoiceDB';
+const STORE_NAME = 'pdfs';
+const DB_VERSION = 1;
+
+interface PDFRecord {
+  filename: string;
+  content: string;
+  sessionId: string;
+  createdAt: number;
+}
+
+// 修改 initDB 的回傳型別
+const initDB = async (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+
+    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: ['sessionId', 'filename'] });
+        store.createIndex('sessionId', 'sessionId', { unique: false });
+        store.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+    };
+  });
+};
+
+// 修改 clearSessionPDFs 函數
+const clearSessionPDFs = async (sessionId: string) => {
+  const db = await initDB();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const index = store.index('sessionId');
+    const request = index.openCursor(IDBKeyRange.only(sessionId));
+
+    request.onerror = () => reject(request.error);
+    
+    const deletePromises: Promise<void>[] = [];
+    
+    request.onsuccess = (event: Event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+      if (cursor) {
+        deletePromises.push(
+          new Promise<void>((res, rej) => {
+            const deleteRequest = cursor.delete();
+            deleteRequest.onerror = () => rej(deleteRequest.error);
+            deleteRequest.onsuccess = () => res();
+          })
+        );
+        cursor.continue();
+      } else {
+        Promise.all(deletePromises)
+          .then(() => resolve())
+          .catch(reject);
+      }
+    };
+  });
+};
+
+// 修改 savePDFToIndexedDB 函數
+const savePDFToIndexedDB = async (sessionId: string, filename: string, content: string) => {
+  const db = await initDB();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const record: PDFRecord = {
+      filename,
+      content,
+      sessionId,
+      createdAt: Date.now()
+    };
+    const request = store.put(record);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+};
+
+// 修改 getSessionPDFs 函數
+const getSessionPDFs = async (sessionId: string) => {
+  const db = await initDB();
+  return new Promise<PDFRecord[]>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const index = store.index('sessionId');
+    const request = index.getAll(IDBKeyRange.only(sessionId));
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+};
+
+// 修改 cleanupOldPDFs 函數
+const cleanupOldPDFs = async (maxAgeHours = 24) => {
+  const db = await initDB();
+  const cutoffTime = Date.now() - (maxAgeHours * 60 * 60 * 1000);
+  
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const index = store.index('createdAt');
+    const request = index.openCursor(IDBKeyRange.upperBound(cutoffTime));
+
+    request.onerror = () => reject(request.error);
+    
+    const deletePromises: Promise<void>[] = [];
+    
+    request.onsuccess = (event: Event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+      if (cursor) {
+        deletePromises.push(
+          new Promise<void>((res, rej) => {
+            const deleteRequest = cursor.delete();
+            deleteRequest.onerror = () => rej(deleteRequest.error);
+            deleteRequest.onsuccess = () => res();
+          })
+        );
+        cursor.continue();
+      } else {
+        Promise.all(deletePromises)
+          .then(() => resolve())
+          .catch(reject);
+      }
+    };
+  });
+};
+
 function AnalysisContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -44,6 +178,15 @@ function AnalysisContent() {
   const [isAnalyzing, setIsAnalyzing] = useState(true)
   const [progress, setProgress] = useState<AnalysisProgress | null>(null)
   const [result, setResult] = useState<AnalysisResult | null>(null)
+  const [currentSessionId, setCurrentSessionId] = useState<string>('')
+
+  useEffect(() => {
+    // 生成新的 session ID
+    setCurrentSessionId(crypto.randomUUID())
+    
+    // 清理過期的 PDF
+    cleanupOldPDFs().catch(console.error)
+  }, [])
 
   useEffect(() => {
     const emailIds = searchParams.get("emails")?.split(",") || []
@@ -116,7 +259,47 @@ function AnalysisContent() {
     };
   }, [isAnalyzing]);
 
-  const handleLogout = () => {
+  // 下載所有當前 session 的 PDF
+  const handleDownloadPDFs = async () => {
+    try {
+      if (!currentSessionId) {
+        message.error('無法識別當前工作階段')
+        return
+      }
+
+      const pdfs = await getSessionPDFs(currentSessionId)
+      if (!pdfs || pdfs.length === 0) {
+        message.error('沒有可下載的 PDF 檔案')
+        return
+      }
+
+      const zip = new JSZip()
+      
+      pdfs.forEach(({ filename, content }) => {
+        zip.file(filename, content, { base64: true })
+      })
+
+      const content = await zip.generateAsync({ type: 'blob' })
+      const url = window.URL.createObjectURL(content)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `invoices_${format(new Date(), "yyyyMMdd_HHmmss")}.zip`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      
+      message.success('PDF 下載完成')
+    } catch (error) {
+      console.error('下載 PDF 失敗:', error)
+      message.error('下載 PDF 失敗')
+    }
+  }
+
+  const handleLogout = async () => {
+    if (currentSessionId) {
+      await clearSessionPDFs(currentSessionId)
+    }
     signOut({ callbackUrl: "/auth/login" })
   }
 
@@ -167,16 +350,27 @@ function AnalysisContent() {
     link.click()
   }
 
-  const handleDownloadPDFs = () => {
-    if (!result?.download_url) return
-    window.location.href = result.download_url
+  const handleBackToSearch = async () => {
+    if (currentSessionId) {
+      await clearSessionPDFs(currentSessionId)
+    }
+    router.push('/dashboard')
   }
+
+  // 組件卸載時清理當前 session 的資料
+  useEffect(() => {
+    return () => {
+      if (currentSessionId) {
+        clearSessionPDFs(currentSessionId).catch(console.error)
+      }
+    }
+  }, [currentSessionId])
 
   return (
     <div className="container mx-auto p-4 space-y-6">
       <div className="flex items-center justify-between">
         <button
-          onClick={() => router.push("/dashboard")}
+          onClick={handleBackToSearch}
           className="flex items-center text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4 mr-1" />
@@ -201,7 +395,7 @@ function AnalysisContent() {
             </button>
             <button
               onClick={handleDownloadPDFs}
-              disabled={!result?.download_url}
+              disabled={isAnalyzing}
               className="flex items-center rounded-md border px-4 py-2 text-sm hover:bg-muted disabled:opacity-50"
             >
               <Download className="h-4 w-4 mr-1" />

@@ -3,29 +3,28 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# 複製 package.json 和 package-lock.json
-COPY frontend/package*.json ./
+# 安裝必要的系統套件
+RUN apk add --no-cache curl
 
-# 安裝依賴
+# 複製 package.json 和 package-lock.json
+COPY package*.json ./
+
+# 安裝相依套件
 RUN npm install
-RUN npm install jszip antd @types/jszip --save
 
 # 複製其餘檔案
-COPY frontend/ .
+COPY . .
 
-# 建立 public 目錄和 favicon.ico
+# 創建 public 目錄和 favicon.ico
 RUN mkdir -p public && touch public/favicon.ico
-
-# 建置應用程式
-RUN npm run build
 
 # 設定環境變數
 ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
 ENV WATCHPACK_POLLING=true
-ENV PORT=3000
 
-# 開放連接埠
+# 暴露連接埠
 EXPOSE 3000
 
 # 啟動開發伺服器
-CMD ["sh", "-c", "npm install && npm run dev -- -p 3000 -H 0.0.0.0"] 
+CMD ["npm", "run", "dev"] 

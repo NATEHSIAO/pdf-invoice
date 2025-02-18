@@ -6,7 +6,7 @@ import type { JWT } from 'next-auth/jwt'
 import type { Session } from 'next-auth'
 import type { Profile } from 'next-auth'
 
-export const authOptions: NextAuthOptions = {
+const options: NextAuthOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
@@ -70,5 +70,5 @@ export const authOptions: NextAuthOptions = {
   }
 }
 
-const handler = NextAuth(authOptions)
+const handler = NextAuth(options)
 export { handler as GET, handler as POST }

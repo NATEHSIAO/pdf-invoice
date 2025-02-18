@@ -10,16 +10,17 @@ RUN apk add --no-cache \
     gcc \
     musl-dev \
     python3-dev \
-    font-noto
+    fontconfig \
+    ttf-dejavu
 
-# 複製需求檔案
-COPY requirements.txt .
+# 複製 requirements.txt
+COPY backend/requirements.txt .
 
-# 安裝 Python 套件
+# 安裝 Python 依賴
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 複製應用程式程式碼
-COPY . .
+COPY backend/ .
 
 # 設定環境變數
 ENV PYTHONPATH=/app
@@ -33,5 +34,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# 啟動應用
-CMD ["sh", "-c", "cd /app && uvicorn app.main:app --host ${HOST} --port ${PORT} --reload"] 
+# 啟動應用程式
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 

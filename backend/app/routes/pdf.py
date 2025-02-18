@@ -54,7 +54,7 @@ class AnalysisProgress(BaseModel):
 class AnalysisResult(BaseModel):
     invoices: List[InvoiceData]
     failed_files: List[str]
-    download_url: Optional[str] = None
+    pdf_contents: List[Dict[str, str]] = []
 
 # 全局變數用於追蹤進度
 current_progress = AnalysisProgress(total=0, current=0, status="idle", message="")
@@ -263,7 +263,6 @@ async def analyze_pdfs(
     payload: AnalyzeRequest,
     current_user: User = Depends(get_current_user)
 ) -> AnalysisResult:
-    # 從請求模型中提取出 emails 列表
     emails = payload.emails
     
     global current_progress
@@ -277,13 +276,12 @@ async def analyze_pdfs(
     result = AnalysisResult(
         invoices=[],
         failed_files=[],
-        download_url=None
+        pdf_contents=[]
     )
     
     try:
         email_service = EmailService(current_user.access_token, current_user.provider)
         
-        # 創建一個異步 HTTP 客戶端
         async with httpx.AsyncClient() as client:
             for email_id in emails:
                 try:
@@ -304,11 +302,9 @@ async def analyze_pdfs(
                         current_progress.current += 1
                         continue
                     
-                    # 處理附件
                     for attachment in email_details["attachments"]:
                         logger.info(f"處理附件: {attachment.get('filename')} (MIME類型: {attachment.get('mimeType')})")
                         
-                        # 檢查是否為 PDF 檔案（擴充支援的 MIME 類型）
                         is_pdf = (
                             attachment["mimeType"] in ["application/pdf", "application/octet-stream"] and
                             attachment["filename"].lower().endswith(".pdf")
@@ -317,7 +313,7 @@ async def analyze_pdfs(
                         if is_pdf:
                             logger.info(f"開始下載 PDF 附件: {attachment['filename']}")
                             pdf_path = await download_pdf_attachment(
-                                client,  # 使用創建的 client
+                                client,
                                 email_service,
                                 email_id,
                                 attachment,
@@ -327,12 +323,25 @@ async def analyze_pdfs(
                             if pdf_path:
                                 logger.info(f"PDF 下載成功，路徑: {pdf_path}")
                                 invoice_data = extract_invoice_data(pdf_path, email_details)
+                                
+                                with open(pdf_path, 'rb') as pdf_file:
+                                    pdf_content = base64.b64encode(pdf_file.read()).decode('utf-8')
+                                
                                 if invoice_data:
                                     logger.info(f"成功解析發票資料: {attachment['filename']}")
                                     result.invoices.append(invoice_data)
+                                    result.pdf_contents.append({
+                                        'filename': attachment['filename'],
+                                        'content': pdf_content
+                                    })
                                 else:
                                     logger.error(f"無法解析發票資料: {attachment['filename']}")
                                     result.failed_files.append(attachment["filename"])
+                                
+                                try:
+                                    os.remove(pdf_path)
+                                except Exception as e:
+                                    logger.error(f"刪除暫存檔案失敗: {str(e)}")
                             else:
                                 logger.error(f"PDF 下載失敗: {attachment['filename']}")
                                 result.failed_files.append(f"下載失敗: {attachment['filename']}")
@@ -366,23 +375,6 @@ async def analyze_pdfs(
 async def get_analysis_progress() -> AnalysisProgress:
     """獲取分析進度"""
     return current_progress
-
-@router.get("/download/{batch_id}")
-async def download_pdfs(batch_id: str):
-    """下載 PDF 檔案"""
-    try:
-        zip_path = os.path.join(TEMP_DIR, f"{batch_id}.zip")
-        if not os.path.exists(zip_path):
-            raise HTTPException(status_code=404, detail="檔案不存在")
-            
-        return FileResponse(
-            zip_path,
-            media_type="application/zip",
-            filename=f"invoices_{batch_id}.zip"
-        )
-    except Exception as e:
-        logger.error(f"下載 PDF 時發生錯誤: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # 定期清理暫存檔案
 async def cleanup_temp_files():
