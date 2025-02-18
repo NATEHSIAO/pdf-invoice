@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Response, Depends, Request
+from fastapi import APIRouter, HTTPException, Response, Depends, Request, Header
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -87,23 +87,35 @@ async def verify_token(token: str = Depends(oauth2_scheme)) -> TokenInfo:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-async def get_current_user(token_info: TokenInfo = Depends(verify_token)) -> User:
-    """獲取當前用戶信息"""
+class User(BaseModel):
+    id: str
+    provider: str
+    access_token: str
+
+async def get_current_user(authorization: str = Header(...)) -> User:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="無效的存取令牌")
+    token = authorization.split(" ")[1]
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://www.googleapis.com/oauth2/v3/tokeninfo",
+            params={"access_token": token}
+        )
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="存取令牌驗證失敗")
+
+    token_info = response.json()
+    user_data = {
+        "id": token_info.get("sub"),
+        "provider": "google",  # 或依實際邏輯決定 provider
+        "access_token": token  # 將由前端傳來的 token 直接保留到 User 模型
+    }
     try:
-        return User(
-            id=token_info.sub,
-            email=token_info.email,
-            name=token_info.name,
-            picture=token_info.picture,
-            provider=token_info.provider
-        )
+        user = User(**user_data)
     except Exception as e:
-        logger.error(f"獲取用戶信息時發生錯誤: {str(e)}")
-        raise HTTPException(
-            status_code=401,
-            detail=f"獲取用戶信息失敗: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(status_code=401, detail="無效的使用者資訊")
+    return user
 
 @router.post("/auth/callback/{provider}")
 async def oauth_callback(provider: str, request: Request):

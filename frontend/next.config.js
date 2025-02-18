@@ -3,22 +3,14 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: '/:path*',
+        source: '/(.*)',
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: `
-              default-src 'self';
-              script-src 'self' 'unsafe-eval' 'unsafe-inline';
-              style-src 'self' 'unsafe-inline';
-              img-src 'self' data: https:;
-              font-src 'self';
-              connect-src 'self' http://localhost:8000 https://accounts.google.com https://www.googleapis.com https://login.microsoftonline.com;
-              frame-src 'self' https://accounts.google.com https://login.microsoftonline.com;
-              form-action 'self';
-            `.replace(/\s+/g, ' ').trim()
+            value:
+              "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:8000 http://backend:8000 https://accounts.google.com https://www.googleapis.com https://login.microsoftonline.com"
           }
-        ]
+        ],
       }
     ]
   },

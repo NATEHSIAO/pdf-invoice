@@ -52,48 +52,46 @@ function AnalysisContent() {
       return
     }
 
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
-
     const startAnalysis = async (emails: string[]) => {
       try {
         if (!session?.user?.accessToken) {
-          console.error('未登入或未找到存取令牌');
-          router.push("/auth/login");
-          return;
+          console.error('未登入或未找到存取令牌')
+          router.push("/auth/login")
+          return
         }
 
-        const response = await fetch(`${API_BASE}/api/pdf/analyze`, {
+        const response = await fetch(`/api/pdf/analyze`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${session.user.accessToken}`
           },
           body: JSON.stringify({ emails })
-        });
+        })
 
         if (!response.ok) {
-          throw new Error('解析失敗');
+          throw new Error('解析失敗')
         }
 
-        const result = await response.json();
-        setResult(result);
-        setIsAnalyzing(false);
+        const result = await response.json()
+        setResult(result)
+        setIsAnalyzing(false)
       } catch (error) {
-        console.error('解析錯誤:', error);
-        setIsAnalyzing(false);
+        console.error('解析錯誤:', error)
+        setIsAnalyzing(false)
       }
-    };
+    }
 
     const pollProgress = async () => {
       try {
-        if (!session?.user?.accessToken) return;
+        if (!session?.user?.accessToken) return
 
         const response = await fetch("/api/pdf/progress", {
           headers: {
             'Authorization': `Bearer ${session.user.accessToken}`
           }
-        });
-        
+        })
+
         if (response.ok) {
           const data = await response.json()
           setProgress(data)
@@ -106,9 +104,9 @@ function AnalysisContent() {
       }
     }
 
-    startAnalysis(emailIds);
-    pollProgress();
-  }, [searchParams, router, session]);
+    startAnalysis(emailIds)
+    pollProgress()
+  }, [searchParams, router, session])
 
   const handleLogout = () => {
     signOut({ callbackUrl: "/auth/login" })
