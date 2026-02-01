@@ -1,6 +1,6 @@
 fastapi==0.109.1
 uvicorn==0.27.0
-python-multipart==0.0.9
+python-multipart==0.0.22
 pydantic==2.6.1
 httpx==0.26.0
 requests==2.31.0
